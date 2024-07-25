@@ -6,6 +6,7 @@
 2. If not already installed, [download and install Docker](https://docs.docker.com/get-docker/)
 3. `git clone https://github.com/c-core-labs/harshness-map.git`
 4. From the *harshness* directory `docker build -t harshness_map .`
+5. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v ./data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
 
 ## Downloading and Preprocessing Annual Data
 The `get_harshness_data` script is used to download annual wave height, sea ice concentration, and iceberg density data

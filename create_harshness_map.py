@@ -98,7 +98,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
         x_resolution (float): Resolution of the output file in degrees longitude.
         y_resolution (float): Resolution of the output file in degrees latitude.
         bounds (tuple(float)): The bounds of the output file in degrees (lon_min, lat_min, lon_max, lat_max).
-        clean (bool): If true, intermediate files will be deleted.
+        clean (bool): If true, intermediate files will be removed.
     Returns:
         harshness_file_name (str): File path of the output harshness map file"""
 
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     parser.add_argument("--lat_min", help="The minimum latitude bound of the output file in degrees. (float)")
     parser.add_argument("--lon_max", help="The maximum longitude bound of the output file in degrees. (float)")
     parser.add_argument("--lat_max", help="The maximum latitude bound of the output file in degrees. (float)")
-    parser.add_argument("--clean", help="If true, intermediate files will be deleted. (bool)") 
+    parser.add_argument("--clean", help="If true, intermediate files will be removed. (bool)") 
 
     #Default values
     start_year=datetime.today().year-1

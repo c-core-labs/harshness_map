@@ -18,6 +18,7 @@ from osgeo_utils import gdal_calc
 import calendar
 import shutil
 from datetime import datetime
+import argparse
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -56,7 +57,8 @@ def download_from_cmems(output_file=None,
                                 end_datetime = data_year_end, 
                                 output_directory = os.path.dirname(output_file), 
                                 output_filename = os.path.basename(output_file), 
-                                force_download = True)
+                                force_download = True,
+                                credentials_file=os.path.join(data_dir, ".copernicusmarine-credentials"))
         logger.info(f"Download complete: {output_file}")
     else: #File already downloaded
         logger.info(f"{output_file} already exists. Skipping download")
@@ -79,7 +81,8 @@ def download_original_files_from_cmems(output_dir=None,
                              filter = f"*_{data_year}*",
                              output_directory = output_dir, 
                              no_directories = True,
-                             force_download = True)
+                             force_download = True,
+                             credentials_file=os.path.join(data_dir, ".copernicusmarine-credentials"))
         logger.info(f"Download complete: {output_dir}")
     else: #File already downloaded
         logger.info(f"{output_dir} already exists. Skipping download")    
@@ -303,7 +306,7 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     if not(os.path.exists(sea_ice_raw_data_netcdf_name)):
         download_from_cmems(output_file =   sea_ice_raw_data_netcdf_name,
                             data_year =     data_year, 
-                            dataset =       "METOFFICE-GLO-SST-L4-REP-OBS-SST", 
+                            dataset =       "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2", 
                             variables =     ["sea_ice_fraction"])
 
     #Count days where average is > threshold (concentration 0% - 90%)

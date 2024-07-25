@@ -3,12 +3,20 @@ FROM python:3.12-slim as builder
 #Install requirements
 RUN apt-get update
 RUN apt-get -y install g++
-RUN apt-get install -y gdal-bin libgdal-dev
+
+#Install gdal with conda
+RUN apt-get -y install wget
+ENV CONDA_DIR /opt/conda
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh
+RUN /bin/bash ~/miniconda.sh -b -p /opt/conda
+ENV PATH=$CONDA_DIR/bin:$PATH
+RUN conda install -c conda-forge -y libgdal=3.9.1
+
 WORKDIR /app
 COPY ./requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
-RUN pip install --no-cache gdal[numpy]==3.6.4
+RUN pip install --no-cache gdal[numpy]==3.9.1
 
 #Copy source code
 COPY ./create_harshness_map.py .
