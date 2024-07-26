@@ -18,6 +18,9 @@ RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 RUN pip install --no-cache gdal[numpy]==3.9.1
 
+#Set environment variables
+ENV PROJ_LIB "/opt/conda/pkgs/proj-9.4.1-hb784bbd_0/share/proj/"
+
 #Copy source code
 COPY ./create_harshness_map.py .
 COPY ./get_harshness_data.py .

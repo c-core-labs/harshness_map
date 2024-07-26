@@ -1,0 +1,7 @@
+#Ignore everything in this directory except this file and the default directory tree
+*
+!.gitignore
+!harshness_maps
+!iceberg_annual_data
+!sea_ice_annual_data
+!waves_annual_data
