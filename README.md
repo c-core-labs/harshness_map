@@ -2,11 +2,10 @@
 
 ## Installation
 
-1. From the directory you would like to install the Harshness Map package `mkdir harshness`
-2. If not already installed, [download and install Docker](https://docs.docker.com/get-docker/)
-3. `git clone https://github.com/c-core-labs/harshness-map.git`
-4. From the *harshness* directory `docker build -t harshness_map .`
-5. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v ./data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
+1. If not already installed, [download and install Docker](https://docs.docker.com/engine/install/)
+2. From the directory you would like to install the Harshness Map package `git clone https://github.com/c-core-labs/harshness_map.git`
+3. From the newly created *harshness_map* directory `docker build -t harshness_map .`
+4. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v ./data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
 
 ## Downloading and Preprocessing Annual Data
 The `get_harshness_data` script is used to download annual wave height, sea ice concentration, and iceberg density data
@@ -17,7 +16,7 @@ Fleming-Drover Harshness Index as follows:
 3. The mean annual open water iceberg areal density (# of icebergs per 100 km^2)
 
 ### To Run
-1. From the *harshness* directory `docker run --rm -it -v ./data:/app/data harshness_map python -m get_harshness_data`
+1. From the *harshness_map* directory `docker run --rm -it -v ./data:/app/data harshness_map python -m get_harshness_data`
 
 ### Parameters
 `--data_year` The year over which to download data and make calculations. (int)  
@@ -43,7 +42,7 @@ The `create_harshness_map` script is used to generate harshness maps from Wave H
 By default the Fleming-Drover Harshness Index is used, but users may specify custom formulas for harshness calculations.
 
 ### To Run
-1. From the *harshness* directory `docker run --rm -it -v ./data:/app/data harshness_map python -m create_harshness_map`
+1. From the *harshness_map* directory `docker run --rm -it -v ./data:/app/data harshness_map python -m create_harshness_map`
 
 ### Parameters
 `--start_year` The first year of data files to include (inclusive). (int)  
