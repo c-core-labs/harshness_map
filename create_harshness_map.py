@@ -142,7 +142,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
             assert os.path.exists(iceberg_file), f"Annual data file in given date range does not exist: {iceberg_file}."
             iceberg_files.append(iceberg_file) 
         except AssertionError as a:
-            logger.warning(a)
+            logger.error(a)
             return None
 
     if len(data_years) > 1:
@@ -166,7 +166,8 @@ def calculate_harshness(start_year=datetime.today().year-1,
         average_sea_ice_file = sea_ice_files[0]
         average_iceberg_file = iceberg_files[0]
     else:
-        raise ValueError(f"End year must be later than or equal to start year. Got start year: {start_year}, end year: {end_year}")
+        logger.error(f"End year must be later than or equal to start year. Got start year: {start_year}, end year: {end_year}")
+        return None
 
     #Warp files to the desired resolution and bounds
     #Waves
@@ -188,6 +189,8 @@ def calculate_harshness(start_year=datetime.today().year-1,
     intermediate_files.append(warped_iceberg_file)
    
     #Calculate Harshness
+    if not(os.path.exists(os.path.join(data_dir, 'harshness_maps'))):
+           os.mkdir(os.path.join(data_dir, 'harshness_maps'))           
     gdal_calc.Calc(formula, 
                 S=warped_sea_ice_file, 
                 W=warped_waves_file,

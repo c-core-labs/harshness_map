@@ -32,9 +32,9 @@ clean = True
 
 ### Example
 ```
-docker run --rm -it -v $PWD/data:/app/data harshness_map python -m get_harshness_data \  
+docker run --rm -it -v $PWD/data:/app/data harshness_map python -m get_harshness_data \
 --data_year=2020 \
---data_dir="./data" \  
+--data_dir="./data" \
 --clean=True
 ```
 ## Creating a Harshness Map
@@ -81,7 +81,7 @@ clean = True
 docker run --rm -it -v $PWD/data:/app/data harshness_map python -m create_harshness_map \
 --start_year=2020 \
 --end_year=2022 \
---data_dir="./data" \  
+--data_dir="./data" \
 --wave_height_thresh=2 \
 --sea_ice_concentration_thresh=0.2 \
 --formula="4*S/350 + 4.5*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))" \
