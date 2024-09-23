@@ -150,33 +150,26 @@ def count_bands_greater_than_thresh(input_file=None,
         thresh (float): The threshold to compare input raster bands to.
     Returns:
         output_file (str)"""
-    input_file_name, input_file_ext = os.path.splitext(input_file)
-    intermediate_file = input_file.replace(input_file_ext, f"_threshold_count.tif")
-    daily_counts = []
-    gdal_calc.Calc(f"A>{thresh}", A=input_file, outfile=intermediate_file, allBands="A")
-    with gdal.Open(intermediate_file) as gdal_dataset:
-        raster_x_size = gdal_dataset.RasterXSize
-        raster_y_size = gdal_dataset.RasterYSize
-        raster_geo_transform = gdal_dataset.GetGeoTransform()
-        raster_projection = gdal_dataset.GetProjection()
-        num_bands = gdal_dataset.RasterCount
-        for band_num in range(1, num_bands + 1):
-            band = gdal_dataset.GetRasterBand(band_num)
-            band_data = band.ReadAsMaskedArray()
-            daily_counts.append(band_data)
-    #Save annual count file
-    final_count = np.ma.sum(daily_counts, axis=0)
-    final_count = np.ma.masked_array(final_count, fill_value=-1)
-    final_count = final_count.filled()
+    with gdal.Open(input_file) as input_raster:
+        input_data_array = input_raster.ReadAsArray()
+        raster_x_size = input_raster.RasterXSize
+        raster_y_size = input_raster.RasterYSize
+        raster_geo_transform = input_raster.GetGeoTransform()
+        raster_projection = input_raster.GetProjection()
+        raster_no_data_value = input_raster.GetRasterBand(1).GetNoDataValue()
+    input_data_array = np.ma.masked_values(input_data_array, raster_no_data_value) #Mask out nodata value
+    output_data_array = np.ma.sum((input_data_array > thresh), axis=0) #Count bands with pixel value > thresh
+    del input_data_array
+    output_data_array = np.ma.masked_array(output_data_array, fill_value=-1) #Set new nodata value to -1
+    output_data_array = output_data_array.filled() #Fill nodata values
     raster_data_type = gdal.GDT_UInt16
-    final_count_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
-    final_count_raster.SetGeoTransform(raster_geo_transform)
-    final_count_raster.SetProjection(raster_projection)
-    final_count_raster.GetRasterBand(1).SetNoDataValue(-1)
-    final_count_raster.GetRasterBand(1).WriteArray(final_count)
-    del final_count_raster
-    os.remove(intermediate_file)
-    logger.info(f"Finished counting bands > {thresh}. Output file is {output_file}")
+    output_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
+    output_raster.SetGeoTransform(raster_geo_transform)
+    output_raster.SetProjection(raster_projection)
+    output_raster.GetRasterBand(1).SetNoDataValue(-1)
+    output_raster.GetRasterBand(1).WriteArray(output_data_array)
+    del output_data_array
+    print(f"Finished counting bands > {thresh} with numpy. Output file is {output_file}")
     return(output_file)
 
 def process_iceberg_data(input_dir=None, 
@@ -221,7 +214,6 @@ def process_iceberg_data(input_dir=None,
     del final_iceberg_concentration_raster
     logger.info(f"Finished processing iceberg data. Output file is {output_file}")
     return(output_file)
-
 
 def download_and_preprocess_data(data_year = datetime.today().year-1,
                                  data_dir =  os.path.join(os.getcwd(), "data"),
