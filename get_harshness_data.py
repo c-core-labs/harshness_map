@@ -126,10 +126,17 @@ def get_waves_daily_averages(input_file=None,
                     daily_averages_raster.GetRasterBand(daily_band_num).WriteArray(daily_average_data)
                     logger.debug(f"Wrote band {daily_band_num}")
                     daily_band_num += 1
+                    del daily_data
+                    del daily_average_data
                 daily_data = [band_data]
                 current_date = band_date
             else: #Same date
                 daily_data.append(band_data)
+            del band
+            del band_timestamp
+            del band_date
+            del band_data
+            
         if daily_data: #Get average from final day
             daily_average_data = np.ma.mean(daily_data, axis=0)
             daily_average_data = np.ma.masked_array(daily_average_data, fill_value=-1)
@@ -151,17 +158,27 @@ def count_bands_greater_than_thresh(input_file=None,
     Returns:
         output_file (str)"""
     with gdal.Open(input_file) as input_raster:
-        input_data_array = input_raster.ReadAsArray()
         raster_x_size = input_raster.RasterXSize
         raster_y_size = input_raster.RasterYSize
+        num_bands = input_raster.RasterCount
         raster_geo_transform = input_raster.GetGeoTransform()
         raster_projection = input_raster.GetProjection()
         raster_no_data_value = input_raster.GetRasterBand(1).GetNoDataValue()
-    input_data_array = np.ma.masked_values(input_data_array, raster_no_data_value) #Mask out nodata value
-    output_data_array = np.ma.sum((input_data_array > thresh), axis=0) #Count bands with pixel value > thresh
-    del input_data_array
-    output_data_array = np.ma.masked_array(output_data_array, fill_value=-1) #Set new nodata value to -1
-    output_data_array = output_data_array.filled() #Fill nodata values
+    
+        rows_per_chunk = int(104857600 / raster_x_size / num_bands) #TODO: Make this a parameter or optimize. For now, read in 100MB at a time (assuming 8bit input data)
+        output_data_array = np.empty((0, raster_x_size), dtype=np.uint16)
+
+        for y_off in range(0, raster_y_size, rows_per_chunk):
+            y_size = min(rows_per_chunk, raster_y_size - y_off)
+            input_data_array = input_raster.ReadAsArray(xoff=0, yoff=y_off, xsize=raster_x_size, ysize=y_size)
+            input_data_array = np.ma.masked_values(input_data_array, raster_no_data_value) #Mask out nodata value
+            chunk_output = np.ma.sum((input_data_array > thresh), axis=0) #Count bands with value greater than threshold
+            chunk_output.fill_value = -1
+            chunk_output = chunk_output.filled() #Fill with new nodata value of -1
+            output_data_array = np.vstack((output_data_array, chunk_output))
+            del input_data_array
+            del chunk_output
+
     raster_data_type = gdal.GDT_UInt16
     output_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
     output_raster.SetGeoTransform(raster_geo_transform)
@@ -193,18 +210,31 @@ def process_iceberg_data(input_dir=None,
             band = gdal_dataset.GetRasterBand(1)
             band_data = band.ReadAsMaskedArray()
             iceberg_data.append(band_data)
-            if not(raster_x_size): #Just need to do this once
+            if not(mean_iceberg_concentration): #Create running count files
                 raster_x_size = gdal_dataset.RasterXSize
                 raster_y_size = gdal_dataset.RasterYSize
                 raster_geo_transform = gdal_dataset.GetGeoTransform()
                 raster_projection = gdal_dataset.GetProjection()
-            else:
+                mean_iceberg_concentration = np.zeros(band_data.shape)
+                valid_data_count = np.zeros(band_data.shape)
+            else: #Check that data is consistent
                 assert raster_x_size == gdal_dataset.RasterXSize, "Input files are not the same size."
                 assert raster_y_size == gdal_dataset.RasterYSize, "Input files are not the same size."
                 assert raster_geo_transform == gdal_dataset.GetGeoTransform(), "Input files are not of the same geotransform."
-                assert raster_projection == gdal_dataset.GetProjection(), "Input files are not in the same projection." 
-    mean_iceberg_concentration = np.ma.mean(iceberg_data, axis=0)
-    mean_iceberg_concentration = np.ma.masked_array(mean_iceberg_concentration, fill_value=-1)
+                assert raster_projection == gdal_dataset.GetProjection(), "Input files are not in the same projection."
+
+            #Add to running counts
+            mask = np.logical_not(band_data.mask)
+            mean_iceberg_concentration[mask] += band_data[mask]
+            valid_data_count += mask
+
+            del band
+            del band_data
+            del mask
+    #Get average
+    mean_iceberg_concentration /= valid_data_count
+    mean_iceberg_concentration = np.ma.masked_invalid(mean_iceberg_concentration)
+    mean_iceberg_concentration.fill_value= -1
     mean_iceberg_concentration = mean_iceberg_concentration.filled()
     final_iceberg_concentration_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
     final_iceberg_concentration_raster.SetGeoTransform(raster_geo_transform)
