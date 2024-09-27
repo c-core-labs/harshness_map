@@ -202,6 +202,7 @@ def process_iceberg_data(input_dir=None,
     raster_y_size = None
     raster_geo_transform = None
     raster_projection = None
+    mean_iceberg_concentration = None
     raster_data_type = gdal.GDT_Float32
     logger.info(f"Processing iceberg data in {input_dir}")
     for iceberg_file in os.listdir(input_dir):
@@ -210,7 +211,7 @@ def process_iceberg_data(input_dir=None,
             band = gdal_dataset.GetRasterBand(1)
             band_data = band.ReadAsMaskedArray()
             iceberg_data.append(band_data)
-            if not(mean_iceberg_concentration): #Create running count files
+            if mean_iceberg_concentration is None: #Create running count files
                 raster_x_size = gdal_dataset.RasterXSize
                 raster_y_size = gdal_dataset.RasterYSize
                 raster_geo_transform = gdal_dataset.GetGeoTransform()
@@ -287,106 +288,115 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     ##Surface Wave Significant Height##
 
     if (int(data_year) >= oldest_wave_height_data_year):
-        #Download current year dataset
-        logger.info(f"Downloading Wave Height Data")
-        waves_raw_data_netcdf_name = f"waves_raw_data_{data_year}.nc"
-        waves_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", waves_raw_data_netcdf_name)
-        if not(os.path.exists(waves_raw_data_netcdf_name)):
-            download_from_cmems(output_file =   waves_raw_data_netcdf_name, 
-                                data_year =     data_year, 
-                                dataset =       "cmems_mod_glo_wav_my_0.2deg_PT3H-i", 
-                                variables =     ["VHM0"])
+        #If all output files exist for the year, return
+        if not(all([os.path.exists(os.path.join(data_dir, "waves_annual_data", f"waves_annual_data_{data_year}_{wave_height_thresh}.tif")) for wave_height_thresh in range(1,11)])):
+            #Download current year dataset
+            logger.info(f"Downloading Wave Height Data")
+            waves_raw_data_netcdf_name = f"waves_raw_data_{data_year}.nc"
+            waves_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", waves_raw_data_netcdf_name)
+            if not(os.path.exists(waves_raw_data_netcdf_name)):
+                download_from_cmems(output_file =   waves_raw_data_netcdf_name, 
+                                    data_year =     data_year, 
+                                    dataset =       "cmems_mod_glo_wav_my_0.2deg_PT3H-i", 
+                                    variables =     ["VHM0"])
 
-        #Read raw data and generate daily averages
-        logger.info("Processing waves data")
-        waves_daily_averages_geotiff_name = f"waves_daily_averages_{data_year}.tif"
-        waves_daily_averages_geotiff_name = os.path.join(data_dir, "raw_data", waves_daily_averages_geotiff_name)
-        if not(os.path.exists(waves_daily_averages_geotiff_name)):
-            get_waves_daily_averages(input_file =    waves_raw_data_netcdf_name,
-                            output_file =   waves_daily_averages_geotiff_name)
+            #Read raw data and generate daily averages
+            logger.info("Processing waves data")
+            waves_daily_averages_geotiff_name = f"waves_daily_averages_{data_year}.tif"
+            waves_daily_averages_geotiff_name = os.path.join(data_dir, "raw_data", waves_daily_averages_geotiff_name)
+            if not(os.path.exists(waves_daily_averages_geotiff_name)):
+                get_waves_daily_averages(input_file =    waves_raw_data_netcdf_name,
+                                output_file =   waves_daily_averages_geotiff_name)
 
-        #Count days where average is > thresholds (1m - 10m)
-        for wave_height_thresh in range(1,11): #Height threshold in metres
-            waves_final_count_geotiff_name = f"waves_annual_data_{data_year}_{wave_height_thresh}.tif"
-            waves_final_count_geotiff_name = os.path.join(data_dir, "waves_annual_data", waves_final_count_geotiff_name)
-            if not(os.path.exists(waves_final_count_geotiff_name)):
-                logger.info(f"Counting number of days with wave height > {wave_height_thresh}m")
-                count_bands_greater_than_thresh(input_file =    waves_daily_averages_geotiff_name,
-                                                output_file =   waves_final_count_geotiff_name,
-                                                thresh =        wave_height_thresh * 100) #Height threshold in centimetres
+            #Count days where average is > thresholds (1m - 10m)
+            for wave_height_thresh in range(1,11): #Height threshold in metres
+                waves_final_count_geotiff_name = f"waves_annual_data_{data_year}_{wave_height_thresh}.tif"
+                waves_final_count_geotiff_name = os.path.join(data_dir, "waves_annual_data", waves_final_count_geotiff_name)
+                if not(os.path.exists(waves_final_count_geotiff_name)):
+                    logger.info(f"Counting number of days with wave height > {wave_height_thresh}m")
+                    count_bands_greater_than_thresh(input_file =    waves_daily_averages_geotiff_name,
+                                                    output_file =   waves_final_count_geotiff_name,
+                                                    thresh =        wave_height_thresh * 100) #Height threshold in centimetres
 
-        #Cleanup files
-        if clean:
-            os.remove(waves_daily_averages_geotiff_name)
-            os.remove(waves_raw_data_netcdf_name)
+            #Cleanup files
+            if clean:
+                os.remove(waves_daily_averages_geotiff_name)
+                os.remove(waves_raw_data_netcdf_name)
 
-        logger.info("Finished processing wave data")
-    else:
+            logger.info("Finished processing wave data")
+        else: #Output files already exist
+            logger.info(f"Preprocessed wave data files already exists for {data_year}. Skipping.")
+    else: #Data year outside valid range
         logger.info(f"Wave Height data is only available from the year {oldest_wave_height_data_year} onward. Not available for {data_year}. Skipping Wave Height data download")
 
     #########################
     ##Sea ice conecntration##
 
     if (int(data_year) >= oldest_sea_ice_data_year):
-        #Download current year dataset
-        logger.info(f"Downloading Sea Ice Concentration Data")
-        sea_ice_raw_data_netcdf_name = f"sea_ice_raw_data_{data_year}.nc"
-        sea_ice_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", sea_ice_raw_data_netcdf_name)
-        if not(os.path.exists(sea_ice_raw_data_netcdf_name)):
-            download_from_cmems(output_file =   sea_ice_raw_data_netcdf_name,
-                                data_year =     data_year, 
-                                dataset =       "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2", 
-                                variables =     ["sea_ice_fraction"])
+        if not(all([os.path.exists(os.path.join(data_dir, "sea_ice_annual_data", f"sea_ice_annual_data_{data_year}_{sea_ice_concentration_threshold}.tif")) for sea_ice_concentration_threshold in range(0,100,10)])):
+            #Download current year dataset
+            logger.info(f"Downloading Sea Ice Concentration Data")
+            sea_ice_raw_data_netcdf_name = f"sea_ice_raw_data_{data_year}.nc"
+            sea_ice_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", sea_ice_raw_data_netcdf_name)
+            if not(os.path.exists(sea_ice_raw_data_netcdf_name)):
+                download_from_cmems(output_file =   sea_ice_raw_data_netcdf_name,
+                                    data_year =     data_year, 
+                                    dataset =       "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2", 
+                                    variables =     ["sea_ice_fraction"])
 
-        #Count days where average is > threshold (concentration 0% - 90%)
-        logger.info("Processing sea ice data")
-        for sea_ice_concentration_threshold in range(0,100,10):
-            sea_ice_final_count_geotiff_name = f"sea_ice_annual_data_{data_year}_{sea_ice_concentration_threshold}.tif"
-            sea_ice_final_count_geotiff_name = os.path.join(data_dir, "sea_ice_annual_data", sea_ice_final_count_geotiff_name)
-            if not(os.path.exists(sea_ice_final_count_geotiff_name)):
-                logger.info(f"Counting number of days with sea ice concentration > {sea_ice_concentration_threshold}%")
-                count_bands_greater_than_thresh(input_file =    sea_ice_raw_data_netcdf_name,
-                                                output_file =   sea_ice_final_count_geotiff_name,
-                                                thresh =        sea_ice_concentration_threshold)
+            #Count days where average is > threshold (concentration 0% - 90%)
+            logger.info("Processing sea ice data")
+            for sea_ice_concentration_threshold in range(0,100,10):
+                sea_ice_final_count_geotiff_name = f"sea_ice_annual_data_{data_year}_{sea_ice_concentration_threshold}.tif"
+                sea_ice_final_count_geotiff_name = os.path.join(data_dir, "sea_ice_annual_data", sea_ice_final_count_geotiff_name)
+                if not(os.path.exists(sea_ice_final_count_geotiff_name)):
+                    logger.info(f"Counting number of days with sea ice concentration > {sea_ice_concentration_threshold}%")
+                    count_bands_greater_than_thresh(input_file =    sea_ice_raw_data_netcdf_name,
+                                                    output_file =   sea_ice_final_count_geotiff_name,
+                                                    thresh =        sea_ice_concentration_threshold)
 
-        #Cleanup files
-        if clean:
-            os.remove(sea_ice_raw_data_netcdf_name)
+            #Cleanup files
+            if clean:
+                os.remove(sea_ice_raw_data_netcdf_name)
 
-        logger.info("Finished processing sea ice data")
-    else:
+            logger.info("Finished processing sea ice data")
+        else: #Output files already exist
+            logger.info(f"Preprocessed sea ice data files already exists for {data_year}. Skipping.")
+    else: #Data year outside valid range
         logger.info(f"Sea Ice data is only available from the year {oldest_sea_ice_data_year} onward. Not available for {data_year}. Skipping Sea Ice data download")
 
     ################
     ##Iceberg data##
 
     if (int(data_year) >= oldest_iceberg_data_year):
-        #Download Current Year Data
-        logger.info(f"Downloading Iceberg Data")
-        iceberg_dir_name = f"iceberg_raw_data_{data_year}"
-        iceberg_dir_name = os.path.join(data_dir, "raw_data", iceberg_dir_name)
-        if not(os.path.exists(iceberg_dir_name)):
-            download_original_files_from_cmems(output_dir = iceberg_dir_name,
-                                            data_year =  data_year,
-                                            dataset =    "DMI-ARC-SEAICE_BERG-L4-NRT-OBS")
-
-        #Get average annual iceberg density
-        logger.info("Processing iceberg data")
         iceberg_mean_density_name = f"iceberg_annual_data_{data_year}.tif"
         iceberg_mean_density_name = os.path.join(data_dir, "iceberg_annual_data", iceberg_mean_density_name)
         if not(os.path.exists(iceberg_mean_density_name)):
+            #Download Current Year Data
+            logger.info(f"Downloading Iceberg Data")
+            iceberg_dir_name = f"iceberg_raw_data_{data_year}"
+            iceberg_dir_name = os.path.join(data_dir, "raw_data", iceberg_dir_name)
+            if not(os.path.exists(iceberg_dir_name)):
+                download_original_files_from_cmems(output_dir = iceberg_dir_name,
+                                                data_year =  data_year,
+                                                dataset =    "DMI-ARC-SEAICE_BERG-L4-NRT-OBS")
+
+            #Get average annual iceberg density
+            logger.info("Processing iceberg data")
             process_iceberg_data(input_dir =    iceberg_dir_name,
                                 output_file =  iceberg_mean_density_name)
 
-        #Cleanup files
-        if clean:
-            shutil.rmtree(iceberg_dir_name)
-            shutil.rmtree(os.path.join(data_dir, "raw_data"))
+            #Cleanup files
+            if clean:
+                shutil.rmtree(iceberg_dir_name)
+                shutil.rmtree(os.path.join(data_dir, "raw_data"))
 
-        logger.info("Finished processing iceberg data")
-        return(data_dir)
-    else:
+            logger.info("Finished processing iceberg data")
+        else: #Output files already exist
+            logger.info(f"Preprocessed iceberg data file already exists for {data_year}. Skipping.")
+    else: #Data year outside valid range
         logger.info(f"Iceberg data is only available from the year {oldest_iceberg_data_year} onward. Not available for {data_year}. Skipping Iceberg data download")
+    return(data_dir)
 
 ##########
 ###MAIN###
