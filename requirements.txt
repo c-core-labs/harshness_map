@@ -24,6 +24,7 @@ executing
 fasteners
 frozenlist
 fsspec
+geopandas
 idna
 importlib_metadata
 ipykernel
@@ -40,6 +41,7 @@ multidict
 nest_asyncio
 netCDF4
 numcodecs
+openpyxl
 packaging
 pandas
 parso
