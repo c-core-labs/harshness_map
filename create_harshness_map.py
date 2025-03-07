@@ -77,6 +77,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
                         data_dir = os.path.join(os.getcwd(), "data"),
                         wave_height_thresh=4,
                         sea_ice_concentration_thresh=60,
+                        icing_thresh="light",
                         formula="6*S/350 + 2.5*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))",
                         x_resolution=0.2,
                         y_resolution=0.2,
@@ -87,14 +88,15 @@ def calculate_harshness(start_year=datetime.today().year-1,
     Files containging data between <start_year> and <end_year> for the given <wave_height_thresh> and <sea_ice_concentration_thresh> are averaged together to generate the input parameters for <formula>
     The resulting harshness map is generated in EPSG:4326 at a resolution <x_resolution> x <y_resolution> degrees for the region defined in <bounds>
     The harshness map is saved as a Geotiff in "<data_dir>/harshness_maps/" with the name:
-    "harshness_<start_year>_<end_year>_<wave_height_thresh>_<sea_ice_concentration_thresh>_<x_resolution>_<y_resolution>_<bounds>.tif"
+    "harshness_<start_year>_<end_year>_<wave_height_thresh>_<sea_ice_concentration_thresh>_<icing_thresh>_<x_resolution>_<y_resolution>_<bounds>.tif"
     Parameters:
         start_year (int): The first year of data files to include (inclusive).
         end_year (int): The last year of data to include (inclusive).
         data_dir (str): The parent directory containing the directories "iceberg_annual_data", "waves_annual_data", and "sea_ice_annual_data".
         wave_height_thresh (int 1-10): Used to define wave input files. Input files contain # of days with wave height > <wave_height_thresh> metres.
         sea_ice_concentration_thresh (int 0-90 by 10s): Used to define sea ice input files. Input files contain # of days with sea ice concentration > <sea_ice_concentration_thresh> percent.
-        formula (str): The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data.
+        icing_thresh (str): The threshold for the icing predictor index. Options are "light", "moderate", "heavy", or "extreme".
+        formula (str): The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data, P = Icing Predictor Data.
         x_resolution (float): Resolution of the output file in degrees longitude.
         y_resolution (float): Resolution of the output file in degrees latitude.
         bounds (tuple(float)): The bounds of the output file in degrees (lon_min, lat_min, lon_max, lat_max).
@@ -109,6 +111,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
     logger.info(f"Data Directory: {data_dir}")
     logger.info(f"Wave Height Threshold: {wave_height_thresh}")
     logger.info(f"Sea Ice Concentration Threshold: {sea_ice_concentration_thresh}")
+    logger.info(f"Icing Threshold: {icing_thresh}")
     logger.info(f"Harshness Formula: {formula}")
     logger.info(f"X Resolution: {x_resolution}")
     logger.info(f"Y Resolution: {y_resolution}")
@@ -117,7 +120,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
 
     encoded_formula = encode_string(formula) #Create a unique identifier to represent the formula in the filename
     intermediate_files = []
-    harshness_file_name = f"harshness_{start_year}_{end_year}_{wave_height_thresh}_{sea_ice_concentration_thresh}_{x_resolution}_{y_resolution}_{bounds[0]}_{bounds[1]}_{bounds[2]}_{bounds[3]}_{encoded_formula}.tif".replace(" ", "")
+    harshness_file_name = f"harshness_{start_year}_{end_year}_{wave_height_thresh}_{sea_ice_concentration_thresh}_{icing_thresh}_{x_resolution}_{y_resolution}_{bounds[0]}_{bounds[1]}_{bounds[2]}_{bounds[3]}_{encoded_formula}.tif".replace(" ", "")
     harshness_file_name = os.path.join(data_dir, 'harshness_maps', harshness_file_name)
 
     #If the requested harshness map already exists, return it
@@ -130,6 +133,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
     waves_files = []
     sea_ice_files = []
     iceberg_files = []
+    icing_files = []
     for data_year in data_years:
         try:
             waves_file = os.path.join(data_dir, "waves_annual_data", f"waves_annual_data_{data_year}_{wave_height_thresh}.tif")
@@ -140,7 +144,10 @@ def calculate_harshness(start_year=datetime.today().year-1,
             sea_ice_files.append(sea_ice_file)
             iceberg_file = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_annual_data_{data_year}.tif")
             assert os.path.exists(iceberg_file), f"Annual data file in given date range does not exist: {iceberg_file}."
-            iceberg_files.append(iceberg_file) 
+            iceberg_files.append(iceberg_file)
+            icing_file = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_{icing_thresh}_icing.tif")
+            assert os.path.exists(icing_file), f"Annual data file in given date range does not exist: {icing_file}."
+            icing_files.append(icing_file)
         except AssertionError as a:
             logger.error(a)
             return None
@@ -160,11 +167,17 @@ def calculate_harshness(start_year=datetime.today().year-1,
         average_iceberg_file = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_average_data_{start_year}-{end_year}.tif")
         get_average_raster(iceberg_files, average_iceberg_file)
         intermediate_files.append(average_iceberg_file)
+        
+        #Average icing files
+        average_icing_file = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_average_{start_year}-{end_year}_{icing_thresh}_icing.tif")
+        get_average_raster(icing_files, average_icing_file)
+        intermediate_files.append(average_icing_file)
 
     elif len(data_years) == 1:
         average_waves_file = waves_files[0]
         average_sea_ice_file = sea_ice_files[0]
         average_iceberg_file = iceberg_files[0]
+        average_icing_file = icing_files[0]
     else:
         logger.error(f"End year must be later than or equal to start year. Got start year: {start_year}, end year: {end_year}")
         return None
@@ -187,14 +200,21 @@ def calculate_harshness(start_year=datetime.today().year-1,
     warped = gdal.Warp(warped_iceberg_file, average_iceberg_file, xRes=x_resolution, yRes=y_resolution, dstSRS="EPSG:4326", outputBounds=bounds) #Iceberg files contain projection information, so no need to specify srcSRS
     del warped
     intermediate_files.append(warped_iceberg_file)
+    
+    #Icing Predictor
+    warped_icing_file = average_icing_file.replace(".tif", f"_{x_resolution}_{y_resolution}_{bounds}.tif".replace(" ", ""))
+    warped = gdal.Warp(warped_icing_file, average_icing_file, xRes=x_resolution, yRes=y_resolution, srcSRS="EPSG:4326", dstSRS="EPSG:4326", outputBounds=bounds)
+    del warped
+    intermediate_files.append(warped_icing_file)
    
     #Calculate Harshness
     if not(os.path.exists(os.path.join(data_dir, 'harshness_maps'))):
-           os.mkdir(os.path.join(data_dir, 'harshness_maps'))           
+           os.mkdir(os.path.join(data_dir, 'harshness_maps'))         
     gdal_calc.Calc(formula, 
                 S=warped_sea_ice_file, 
                 W=warped_waves_file,
                 I=warped_iceberg_file,
+                P=warped_icing_file,
                 outfile=harshness_file_name)
     
     if clean:
@@ -217,6 +237,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", help="The parent directory containing the directories 'iceberg_annual_data', 'waves_annual_data', and 'sea_ice_annual_data'. (str)")
     parser.add_argument("--wave_height_thresh", help="Used to define wave input files. Input files contain # of days with wave height > <wave_height_thresh> metres. (int 1-10)")
     parser.add_argument("--sea_ice_concentration_thresh", help="Used to define sea ice input files. Input files contain # of days with sea ice concentration > <sea_ice_concentration_thresh> percent. (int 0-90 by 10s)")
+    parser.add_argument("--icing_thresh", help="The threshold for the icing predictor index. Options are 'light', 'moderate', 'heavy', or 'extreme'. (str)")
     parser.add_argument("--formula", help="The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data. (str)")
     parser.add_argument("--x_resolution", help="Resolution of the output file in degrees longitude. (float)")
     parser.add_argument("--y_resolution", help="Resolution of the output file in degrees latitude. (float)")
@@ -232,6 +253,7 @@ if __name__ == "__main__":
     data_dir = os.path.join(os.getcwd(), "data")
     wave_height_thresh=4
     sea_ice_concentration_thresh=60
+    icing_thresh="light"
     formula="6*S/350 + 2.5*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))"
     x_resolution=0.2
     y_resolution=0.2
@@ -254,6 +276,8 @@ if __name__ == "__main__":
         wave_height_thresh = int(args.wave_height_thresh)
     if args.sea_ice_concentration_thresh is not None:
         sea_ice_concentration_thresh = int(args.sea_ice_concentration_thresh)
+    if args.icing_thresh is not None:
+        icing_thresh = args.icing_thresh
     if args.formula is not None:
         formula = args.formula
     if args.x_resolution is not None:
@@ -276,6 +300,7 @@ if __name__ == "__main__":
                         data_dir = data_dir,
                         wave_height_thresh=wave_height_thresh,
                         sea_ice_concentration_thresh=sea_ice_concentration_thresh,
+                        icing_thresh=icing_thresh,
                         formula=formula,
                         x_resolution=x_resolution,
                         y_resolution=y_resolution,

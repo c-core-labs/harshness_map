@@ -6,7 +6,9 @@ Fleming-Drover Harshness Index as follows:
 2. The mean annual number of days with a sea ice concentration greater than a given threshold (0-90 percent in increments of 10)
 3. The mean annual open water iceberg areal density (# of icebergs per 100 km^2)
 
-Data Acknowledgement: Data downloaded are provided by GHRSST, Met Office and CMEMS
+Additionally, relevant data is downloaded from Copernicus Climate Data Service in order to calculate an Icing Predictor Index
+
+Data Acknowledgement: Data downloaded are provided by GHRSST, Met Office and CMEMS, as well as CDS
 """
 
 import copernicusmarine
@@ -19,6 +21,8 @@ import calendar
 import shutil
 from datetime import datetime
 import argparse
+import cdsapi
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -51,15 +55,21 @@ def download_from_cmems(output_file=None,
         data_year_start = f"{data_year}-01-01"
         data_year_end = f"{data_year}-12-31T21:00:00"
         logger.info(f"Downloading {data_year} {dataset} from Copernicus Marine")
-        copernicusmarine.subset(dataset_id = dataset, 
-                                variables = variables, 
-                                start_datetime = data_year_start, 
-                                end_datetime = data_year_end, 
-                                output_directory = os.path.dirname(output_file), 
-                                output_filename = os.path.basename(output_file), 
-                                force_download = True,
-                                credentials_file=os.path.join(data_dir, ".copernicusmarine-credentials"))
-        logger.info(f"Download complete: {output_file}")
+        try:
+            copernicusmarine.subset(dataset_id = dataset, 
+                                    variables = variables, 
+                                    start_datetime = data_year_start, 
+                                    end_datetime = data_year_end, 
+                                    output_directory = os.path.dirname(output_file), 
+                                    output_filename = os.path.basename(output_file), 
+                                    force_download = True,
+                                    credentials_file=os.path.join(data_dir, ".copernicusmarine-credentials"))
+            logger.info(f"Download complete: {output_file}")
+        except Exception as e:
+            logger.error(f"Download failed: {e}")
+            os.remove(output_file)
+            raise e
+
     else: #File already downloaded
         logger.info(f"{output_file} already exists. Skipping download")
     return(output_file)
@@ -87,6 +97,65 @@ def download_original_files_from_cmems(output_dir=None,
     else: #File already downloaded
         logger.info(f"{output_dir} already exists. Skipping download")    
     return(output_dir)
+
+def download_from_cds(output_file=None,
+                      data_year=None, 
+                      dataset=None, 
+                      variables=None):
+    """Downloads data from the Copernicus Climate Data Service using the cdsapi.
+    Parameters:
+        output_file (str): File path where the downloaded dataset will be stored. Must be a NetCDF (.nc) file.
+        data_year (int): The dataset will contain data from Jan 1 to Dec 31 of this year.
+        dataset (str): The name of the CDS dataset to download.
+        variables (list[str]): A list of variables to download from the dataset.
+    Returns:
+        output_file (str)"""
+    
+    if not os.path.exists(output_file):
+        
+        logger.info(f"Downloading {data_year} {dataset} {variables} from Copernicues Climate Data Store")
+
+        try:
+            client = cdsapi.Client()
+            request = {
+                "product_type": "reanalysis",
+                "variable": variables,
+                "year": data_year,
+                "month": [
+                    "01", "02", "03",
+                    "04", "05", "06",
+                    "07", "08", "09",
+                    "10", "11", "12"
+                ],
+                "day": [
+                    "01", "02", "03",
+                    "04", "05", "06",
+                    "07", "08", "09",
+                    "10", "11", "12",
+                    "13", "14", "15",
+                    "16", "17", "18",
+                    "19", "20", "21",
+                    "22", "23", "24",
+                    "25", "26", "27",
+                    "28", "29", "30",
+                    "31"
+                ],
+                "daily_statistic": "daily_mean",
+                "time_zone": "utc+00:00",
+                "frequency": "1_hourly"
+            }
+            client.retrieve(dataset, request, output_file)
+            logger.info(f"Download complete: {output_file}")
+            
+        except Exception as e:
+            logger.error(f"Download failed: {e}")
+            os.remove(output_file)
+            raise e
+    
+    else: #File already downloaded
+        logger.info(f"{output_file} already exists. Skipping download")
+        
+    return(output_file)
 
 def get_waves_daily_averages(input_file=None, 
                              output_file=None):
@@ -139,6 +208,49 @@ def get_waves_daily_averages(input_file=None,
             logger.debug(f"Wrote band {daily_band_num}")   
     del daily_averages_raster #Close the file after writing
     return(output_file)
+
+def get_average_raster(input_files = [],
+                       output_file = None):
+    """Calculates the mean of all rasters in the list <input_files> and writes the result to <output_file>.
+    Parameters:
+        input_files (list[str]): A list of paths to input raster files to be averaged. All rasters must be the same size, geo_transform, and projection.
+        output_file (str): The path to the file in which the averaged raster will be saved. Must be a Geotiff.
+    Returns: 
+        output_file (str)"""
+    data = []
+    raster_x_size = None
+    raster_y_size = None
+    raster_geo_transform = None
+    raster_projection = None
+    raster_data_type = gdal.GDT_Float32
+    logger.info(f"Calculating average of {len(input_files)} rasters.")
+    for file in input_files:
+        with gdal.Open(file) as gdal_dataset:
+            band = gdal_dataset.GetRasterBand(1)
+            band_data = band.ReadAsMaskedArray()
+            data.append(band_data)
+            if not(raster_x_size): #Just need to do this once
+                raster_x_size = gdal_dataset.RasterXSize
+                raster_y_size = gdal_dataset.RasterYSize
+                raster_geo_transform = gdal_dataset.GetGeoTransform()
+                raster_projection = gdal_dataset.GetProjection()
+            else:
+                assert raster_x_size == gdal_dataset.RasterXSize, "Raster files are not the same size."
+                assert raster_y_size == gdal_dataset.RasterYSize, "Raster files are not the same size."
+                assert raster_geo_transform == gdal_dataset.GetGeoTransform(), "Raster files are not of the same geotransform."
+                assert raster_projection == gdal_dataset.GetProjection(), "Raster files are not in the same projection." 
+    mean_data = np.ma.mean(data, axis=0)
+    mean_data = np.ma.masked_array(mean_data, fill_value=-1)
+    mean_data = mean_data.filled()
+    output_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
+    output_raster.SetGeoTransform(raster_geo_transform)
+    output_raster.SetProjection(raster_projection)
+    output_raster.GetRasterBand(1).SetNoDataValue(-1)
+    output_raster.GetRasterBand(1).WriteArray(mean_data)
+    del output_raster
+    logger.info(f"Finished averageing rasters. Output file is {output_file}")
+    return output_file
+
 
 def count_bands_greater_than_thresh(input_file=None, 
                                     output_file=None, 
@@ -222,20 +334,47 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     Calculates the number of days in the year that the wave height and sea ice concentration data exceed various thresholds.
     Averages the iceberg density over the year.
     Output data is stored in <data_dir>/waves_annual_data/, <data_dir>/sea_ice_annual_data/, and <data_dir>/iceberg_annual_data/
+    
+    Also downloads sea surface temperature, wind speed, air temperature, sea ice cover, and sea water salinity data for a given year 
+    from Copernicus Climate Data Store and Copernicus Marine Service and uses this data to calculate an annual Icing Predictor Index stored in <data_dir>/icing_predictor_annual_data/.
     Data downloaded from CMEMs are: 
         cmems_mod_glo_wav_my_0.2deg_PT3H-i (VHM0) for significant wave height data 
         METOFFICE-GLO-SST-L4-REP-OBS-SST (sea_ice_fraction) for sea ice concentration data,
         DMI-ARC-SEAICE_BERG-L4-NRT-OBS (ibc) for iceberg concentration data
+        cmems_mod_glo_phy_myint_0.083deg_P1D-m (so) for salinity (Not currently implemented)
+    Data Downloaded from CDS are:
+        derived-era5-single-levels-daily-statistics:
+            sea_surface_temperature
+            10m_u_component_of_wind
+            110m_v_component_of_wind
+            2m_temperature
+            sea_ice_cover
     Output data calculated are:
         Number of days with significant wave heights > 1, 2, 3, 4, 5, 6, 7, 8, 9, and 10 metres
         Number of days with sea ice concentration > 0, 10, 20, 30, 40, 50, 60, 70, 80, and 90 percent
         Average annual iceberg density
+        Number of days with Icing Predictor Index <= 0 (no icing), < 0 (light icing), > 22 (moderate icing), > 53 (heavy icing), > 83 (extreme icing)
     Parameters:
         data_year (int): The year over which to download data and make calculations.
         data_dir (str): Path to a parent directory in which output data will be stored.
         clean (bool): If true, intermediate files will be removed.
     Returns:
         data_dir (str)"""
+    
+    SEA_ICE_THRESH = 0.15 #The threshold of sea ice cover below which icing can occur (expressed as a fraction of 1)
+    FREEZING_POINT = -1.8 #The freezing point of sea water (in degrees Celcius)
+    LIGHT_ICING_THRESH = 0 #The threshold of the icing predictor for light icing
+    MODERATE_ICING_THRESH = 22 #The threshold of the icing predictor for moderate icing
+    HEAVY_ICING_THRESH = 53 #The threshold of the icing predictor for heavy icing
+    EXTREME_ICING_THRESH = 83 #The threshold of the icing predictor for extreme icing
+    OLDEST_WAVE_HEIGHT_DATA_YEAR = 1993
+    OLDEST_SEA_ICE_DATA_YEAR = 2007
+    OLDEST_ICEBERG_DATA_YEAR = 2020
+    OLDEST_CDS_DATA_YEAR = 1940
+    
+    # Note on Salinity data: This data is used to calculate Tf, the freezing point of seawater, but after a brief time searching online, 
+    # I couldn't find a universally agreed upon formula for salinity dependant freezing point.
+    # At some point we can look into this further, but for now, maybe easiest to just use a constant value of -1.8 for Tf and not worry about salinity
     
     logger.info(f"Beginning Download and Preprocessing for Year {data_year}")
 
@@ -249,14 +388,14 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         os.mkdir(os.path.join(data_dir, "sea_ice_annual_data"))
     if not(os.path.exists(os.path.join(data_dir, "iceberg_annual_data"))):
         os.mkdir(os.path.join(data_dir, "iceberg_annual_data"))
+    if not os.path.exists(os.path.join(data_dir, "icing_predicor_annual_data")):
+        os.mkdir(os.path.join(data_dir, "icing_predictor_annual_data"))
     
-    oldest_wave_height_data_year = 1993
-    oldest_sea_ice_data_year = 2007
-    oldest_iceberg_data_year = 2020
+
     ###################################
     ##Surface Wave Significant Height##
 
-    if (int(data_year) >= oldest_wave_height_data_year):
+    if (int(data_year) >= OLDEST_WAVE_HEIGHT_DATA_YEAR):
         #Download current year dataset
         logger.info(f"Downloading Wave Height Data")
         waves_raw_data_netcdf_name = f"waves_raw_data_{data_year}.nc"
@@ -292,12 +431,12 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
 
         logger.info("Finished processing wave data")
     else:
-        logger.info(f"Wave Height data is only available from the year {oldest_wave_height_data_year} onward. Not available for {data_year}. Skipping Wave Height data download")
+        logger.info(f"Wave Height data is only available from the year {OLDEST_WAVE_HEIGHT_DATA_YEAR} onward. Not available for {data_year}. Skipping Wave Height data download")
 
     #########################
     ##Sea ice conecntration##
 
-    if (int(data_year) >= oldest_sea_ice_data_year):
+    if (int(data_year) >= OLDEST_SEA_ICE_DATA_YEAR):
         #Download current year dataset
         logger.info(f"Downloading Sea Ice Concentration Data")
         sea_ice_raw_data_netcdf_name = f"sea_ice_raw_data_{data_year}.nc"
@@ -325,12 +464,12 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
 
         logger.info("Finished processing sea ice data")
     else:
-        logger.info(f"Sea Ice data is only available from the year {oldest_sea_ice_data_year} onward. Not available for {data_year}. Skipping Sea Ice data download")
+        logger.info(f"Sea Ice data is only available from the year {OLDEST_SEA_ICE_DATA_YEAR} onward. Not available for {data_year}. Skipping Sea Ice data download")
 
     ################
     ##Iceberg data##
 
-    if (int(data_year) >= oldest_iceberg_data_year):
+    if (int(data_year) >= OLDEST_ICEBERG_DATA_YEAR):
         #Download Current Year Data
         logger.info(f"Downloading Iceberg Data")
         iceberg_dir_name = f"iceberg_raw_data_{data_year}"
@@ -354,9 +493,201 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             shutil.rmtree(os.path.join(data_dir, "raw_data"))
 
         logger.info("Finished processing iceberg data")
-        return(data_dir)
     else:
-        logger.info(f"Iceberg data is only available from the year {oldest_iceberg_data_year} onward. Not available for {data_year}. Skipping Iceberg data download")
+        logger.info(f"Iceberg data is only available from the year {OLDEST_ICEBERG_DATA_YEAR} onward. Not available for {data_year}. Skipping Iceberg data download")
+
+   
+    #######################
+    #Icing Predictor Index#
+    
+    #Download datasets#
+
+    sea_surface_temp_netcdf_name = os.path.join(data_dir, "raw_data", f"sea_surface_temperature_{data_year}.nc")
+    wind_speed_u_netcdf_name = os.path.join(data_dir, "raw_data", f"wind_speed_u_{data_year}.nc")
+    wind_speed_v_netcdf_name = os.path.join(data_dir, "raw_data", f"wind_speed_v_{data_year}.nc")
+    air_temp_netcdf_name = os.path.join(data_dir, "raw_data", f"air_temperature_{data_year}.nc")
+    sea_ice_cover_netcdf_name = os.path.join(data_dir, "raw_data", f"sea_ice_cover_{data_year}.nc")
+
+    #Sea Surface Temperature Data
+    if os.path.exists(sea_surface_temp_netcdf_name):
+        logger.info(f"Sea surface temperature data already exists for {data_year}. Skipping download.")
+    else:
+        logger.info(f"Downloading sea surface temperature data for {data_year}")
+        download_from_cds(output_file =   sea_surface_temp_netcdf_name, 
+                        data_year =     data_year,
+                        dataset =       "derived-era5-single-levels-daily-statistics", 
+                        variables =     ["sea_surface_temperature"])
+    
+    #Wind Speed Data
+    if os.path.exists(wind_speed_u_netcdf_name):
+        logger.info(f"U component wind speed data already exists for {data_year}. Skipping download.")
+    else:
+        logger.info(f"Downloading U component wind speed data for {data_year}")
+        download_from_cds(output_file =   wind_speed_u_netcdf_name, 
+                        data_year =     data_year,
+                        dataset =       "derived-era5-single-levels-daily-statistics", 
+                        variables =     ["10m_u_component_of_wind"])
+    if os.path.exists(wind_speed_v_netcdf_name):
+        logger.info(f"V component wind speed data already exists for {data_year}. Skipping download.")
+    else:
+        logger.info(f"Downloading V component wind speed data for {data_year}")
+        download_from_cds(output_file =   wind_speed_v_netcdf_name, 
+                        data_year =     data_year,
+                        dataset =       "derived-era5-single-levels-daily-statistics", 
+                        variables =     ["10m_v_component_of_wind"])
+    
+    #Air Temperature Data
+    if os.path.exists(air_temp_netcdf_name):
+        logger.info(f"Air temperature data already exists for {data_year}. Skipping download.")
+    else:
+        logger.info(f"Downloading air temperature data for {data_year}")
+        download_from_cds(output_file =   air_temp_netcdf_name, 
+                        data_year =     data_year,
+                        dataset =       "derived-era5-single-levels-daily-statistics", 
+                        variables =     ["2m_temperature"])
+    
+    #Sea Ice Cover Data
+    if os.path.exists(sea_ice_cover_netcdf_name):
+        logger.info(f"Sea ice cover data already exists for {data_year}. Skipping download.")
+    else:
+        logger.info(f"Downloading sea ice cover data for {data_year}")
+        download_from_cds(output_file =   sea_ice_cover_netcdf_name, 
+                        data_year =     data_year,
+                        dataset =       "derived-era5-single-levels-daily-statistics", 
+                        variables =     ["sea_ice_cover"])
+    
+
+    #Open Datasets#
+    
+    
+    try:
+        sea_surface_temp_netcdf_dataset_name = f"NETCDF:{sea_surface_temp_netcdf_name}:sst"
+        wind_speed_U_netcdf_dataset_name = f"NETCDF:{wind_speed_u_netcdf_name}:u10"
+        wind_speed_V_netcdf_dataset_name = f"NETCDF:{wind_speed_v_netcdf_name}:v10"
+        air_temp_netcdf_dataset_name = f"NETCDF:{air_temp_netcdf_name}:t2m"
+        sea_ice_cover_netcdf_dataset_name = f"NETCDF:{sea_ice_cover_netcdf_name}:siconc"
+
+        sea_surface_temp_dataset = gdal.Open(sea_surface_temp_netcdf_dataset_name)
+        wind_speed_U_dataset = gdal.Open(wind_speed_U_netcdf_dataset_name)
+        wind_speed_V_dataset = gdal.Open(wind_speed_V_netcdf_dataset_name)
+        air_temp_dataset = gdal.Open(air_temp_netcdf_dataset_name)
+        sea_ice_cover_dataset = gdal.Open(sea_ice_cover_netcdf_dataset_name)
+        
+        raster_x_size = sea_surface_temp_dataset.RasterXSize
+        raster_y_size = sea_surface_temp_dataset.RasterYSize
+        ref_projection = sea_surface_temp_dataset.GetProjection()    
+        ref_geotransform  = sea_surface_temp_dataset.GetGeoTransform()
+        num_bands = sea_surface_temp_dataset.RasterCount
+    except Exception as e:
+        logger.error(f"Failed to read raw datasets: {e}")
+        return None
+        
+    try:
+        assert ref_projection == wind_speed_U_dataset.GetProjection(), "Projections of raw data files do not match"
+        assert ref_projection == wind_speed_V_dataset.GetProjection(), "Projections of raw data files do not match"
+        assert ref_projection == air_temp_dataset.GetProjection(), "Projections of raw data files do not match"
+        assert ref_projection == sea_ice_cover_dataset.GetProjection(), "Projections of raw data files do not match"
+        assert ref_geotransform == wind_speed_U_dataset.GetGeoTransform(), "Geotransforms of raw data files do not match"
+        assert ref_geotransform == wind_speed_V_dataset.GetGeoTransform(), "Geotransforms of raw data files do not match"
+        assert ref_geotransform == air_temp_dataset.GetGeoTransform(), "Geotransforms of raw data files do not match"
+        assert ref_geotransform == sea_ice_cover_dataset.GetGeoTransform(), "Geotransforms of raw data files do not match"
+        assert num_bands == wind_speed_U_dataset.RasterCount, "Number of bands in raw data files do not match"
+        assert num_bands == wind_speed_V_dataset.RasterCount, "Number of bands in raw data files do not match"
+        assert num_bands == air_temp_dataset.RasterCount, "Number of bands in raw data files do not match"
+        assert num_bands == sea_ice_cover_dataset.RasterCount, "Number of bands in raw data files do not match"
+    except AssertionError as a:
+        logger.error(f"Raw data files metadata does not match: {a}")
+        return None
+    
+    
+    #Calculate daily icing predictor values#
+    
+    
+    #Name output files
+    no_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_no_icing.tif")
+    light_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_light_or_greater.tif")
+    moderate_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_moderate_or_greater.tif")
+    heavy_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_heavy_or_greater.tif")
+    extreme_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_extreme_icing.tif")
+    
+    if os.path.exists(no_icing_geotiff_name) \
+    and os.path.exists(light_icing_geotiff_name) \
+    and os.path.exists(moderate_icing_geotiff_name) \
+    and os.path.exists(heavy_icing_geotiff_name) \
+    and os.path.exists(extreme_icing_geotiff_name):
+        logger.info(f"Icing predictor maps already exist for {data_year}. Skipping calculation.")
+    
+    else:
+        logger.info(f"Calculating daily icing predictor values for {data_year}")     
+        no_icing_days = np.zeros([raster_y_size, raster_x_size])
+        light_icing_days = np.zeros([raster_y_size, raster_x_size])
+        moderate_icing_days = np.zeros([raster_y_size, raster_x_size])
+        heavy_icing_days = np.zeros([raster_y_size, raster_x_size])
+        extreme_icing_days = np.zeros([raster_y_size, raster_x_size])
+        
+        for band_num in tqdm(range(1, num_bands+1)):
+            sea_surface_temp = sea_surface_temp_dataset.GetRasterBand(band_num).ReadAsArray()
+            wind_speed_U = wind_speed_U_dataset.GetRasterBand(band_num).ReadAsArray()
+            wind_speed_V = wind_speed_V_dataset.GetRasterBand(band_num).ReadAsArray()
+            air_temp = air_temp_dataset.GetRasterBand(band_num).ReadAsArray()
+            sea_ice_cover = sea_ice_cover_dataset.GetRasterBand(band_num).ReadAsArray()
+            
+            sea_surface_temp = sea_surface_temp - 273.15 #Convert from Kelvin to Celcius
+            wind_speed = np.sqrt(wind_speed_U**2 + wind_speed_V**2) #Calculate total wind speed
+            air_temp = air_temp - 273.15 #Convert from Kelvin to Celcius
+            sea_ice_mask = np.where(np.isnan(sea_ice_cover), np.nan, sea_ice_cover < SEA_ICE_THRESH) #Calculate whether sea_ice_cover is below threshold, preserving nan values
+            icing_predictor = sea_ice_mask * (wind_speed * (FREEZING_POINT - air_temp) / (1 + 0.3 * (sea_surface_temp - FREEZING_POINT))) #Calculate icing predictor
+            
+            no_icing_days += np.where(np.isnan(icing_predictor), np.nan, icing_predictor <= LIGHT_ICING_THRESH) #Count days with no icing
+            light_icing_days += np.where(np.isnan(icing_predictor), np.nan, (icing_predictor > LIGHT_ICING_THRESH)) #Count days with light or greater icing
+            moderate_icing_days += np.where(np.isnan(icing_predictor), np.nan, (icing_predictor > MODERATE_ICING_THRESH)) #Count days with moderate or greater icing
+            heavy_icing_days += np.where(np.isnan(icing_predictor), np.nan, (icing_predictor > HEAVY_ICING_THRESH)) #Count days with heavy or greater icing
+            extreme_icing_days += np.where(np.isnan(icing_predictor), np.nan, icing_predictor > EXTREME_ICING_THRESH) #Count days with extreme icing
+
+        
+        #Create output files
+        logger.info(f"Writing icing predictor maps to {os.path.join(data_dir, 'icing_predictor_annual_data')}")
+        no_icing_raster = gdal.GetDriverByName("GTiff").Create(no_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
+        light_icing_raster = gdal.GetDriverByName("GTiff").Create(light_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
+        moderate_icing_raster = gdal.GetDriverByName("GTiff").Create(moderate_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
+        heavy_icing_raster = gdal.GetDriverByName("GTiff").Create(heavy_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
+        extreme_icing_raster = gdal.GetDriverByName("GTiff").Create(extreme_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
+        
+        #CDS datasets sometimes use x coordinates of 0 to 360 instead of -180 to 180. We will explicitly set the upper left corner to -180,90 for the output rasters
+        ref_geotransform[0] = -180
+        ref_geotransform[3] = 90
+        no_icing_raster.SetGeoTransform(ref_geotransform)
+        light_icing_raster.SetGeoTransform(ref_geotransform)
+        moderate_icing_raster.SetGeoTransform(ref_geotransform)
+        heavy_icing_raster.SetGeoTransform(ref_geotransform)
+        extreme_icing_raster.SetGeoTransform(ref_geotransform)
+        
+        no_icing_raster.SetProjection(ref_projection)
+        light_icing_raster.SetProjection(ref_projection)
+        moderate_icing_raster.SetProjection(ref_projection)
+        heavy_icing_raster.SetProjection(ref_projection)
+        extreme_icing_raster.SetProjection(ref_projection)
+        
+        no_icing_raster.GetRasterBand(1).WriteArray(no_icing_days)
+        light_icing_raster.GetRasterBand(1).WriteArray(light_icing_days)
+        moderate_icing_raster.GetRasterBand(1).WriteArray(moderate_icing_days)
+        heavy_icing_raster.GetRasterBand(1).WriteArray(heavy_icing_days)
+        extreme_icing_raster.GetRasterBand(1).WriteArray(extreme_icing_days)
+        
+        #Clean up datasets
+        del sea_surface_temp_dataset
+        del wind_speed_U_dataset
+        del wind_speed_V_dataset
+        del air_temp_dataset
+        del sea_ice_cover_dataset
+        del no_icing_raster
+        del light_icing_raster
+        del moderate_icing_raster
+        del heavy_icing_raster
+        del extreme_icing_raster
+        
+        logger.info(f"Finished calculating daily icing predictor values for {data_year}")
+        return(data_dir)
 
 ##########
 ###MAIN###
