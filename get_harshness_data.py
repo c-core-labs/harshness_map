@@ -23,6 +23,7 @@ from datetime import datetime
 import argparse
 import cdsapi
 from tqdm import tqdm
+import time
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -401,18 +402,24 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         waves_raw_data_netcdf_name = f"waves_raw_data_{data_year}.nc"
         waves_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", waves_raw_data_netcdf_name)
         if not(os.path.exists(waves_raw_data_netcdf_name)):
+            start = time.time()
             download_from_cmems(output_file =   waves_raw_data_netcdf_name, 
                                 data_year =     data_year, 
                                 dataset =       "cmems_mod_glo_wav_my_0.2deg_PT3H-i", 
                                 variables =     ["VHM0"])
+            end = time.time()
+            logger.debug(f"Waves download took {end-start} seconds")
 
         #Read raw data and generate daily averages
         logger.info("Processing waves data")
         waves_daily_averages_geotiff_name = f"waves_daily_averages_{data_year}.tif"
         waves_daily_averages_geotiff_name = os.path.join(data_dir, "raw_data", waves_daily_averages_geotiff_name)
         if not(os.path.exists(waves_daily_averages_geotiff_name)):
+            start = time.time()
             get_waves_daily_averages(input_file =    waves_raw_data_netcdf_name,
                             output_file =   waves_daily_averages_geotiff_name)
+            end = time.time()
+            logger.debug(f"Waves daily averages took {end-start} seconds")
 
         #Count days where average is > thresholds (1m - 10m)
         for wave_height_thresh in range(1,11): #Height threshold in metres
@@ -420,9 +427,12 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             waves_final_count_geotiff_name = os.path.join(data_dir, "waves_annual_data", waves_final_count_geotiff_name)
             if not(os.path.exists(waves_final_count_geotiff_name)):
                 logger.info(f"Counting number of days with wave height > {wave_height_thresh}m")
+                start = time.time()
                 count_bands_greater_than_thresh(input_file =    waves_daily_averages_geotiff_name,
                                                 output_file =   waves_final_count_geotiff_name,
                                                 thresh =        wave_height_thresh * 100) #Height threshold in centimetres
+                end = time.time()
+                logger.debug(f"Wave height count took {end-start} seconds")
 
         #Cleanup files
         if clean:
@@ -442,10 +452,13 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         sea_ice_raw_data_netcdf_name = f"sea_ice_raw_data_{data_year}.nc"
         sea_ice_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", sea_ice_raw_data_netcdf_name)
         if not(os.path.exists(sea_ice_raw_data_netcdf_name)):
+            start = time.time()
             download_from_cmems(output_file =   sea_ice_raw_data_netcdf_name,
                                 data_year =     data_year, 
                                 dataset =       "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2", 
                                 variables =     ["sea_ice_fraction"])
+            end = time.time()
+            logger.debug(f"Sea ice download took {end-start} seconds")
 
         #Count days where average is > threshold (concentration 0% - 90%)
         logger.info("Processing sea ice data")
@@ -454,9 +467,12 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             sea_ice_final_count_geotiff_name = os.path.join(data_dir, "sea_ice_annual_data", sea_ice_final_count_geotiff_name)
             if not(os.path.exists(sea_ice_final_count_geotiff_name)):
                 logger.info(f"Counting number of days with sea ice concentration > {sea_ice_concentration_threshold}%")
+                start = time.time()
                 count_bands_greater_than_thresh(input_file =    sea_ice_raw_data_netcdf_name,
                                                 output_file =   sea_ice_final_count_geotiff_name,
                                                 thresh =        sea_ice_concentration_threshold)
+                end = time.time()
+                logger.debug(f"Sea ice count took {end-start} seconds")
 
         #Cleanup files
         if clean:
@@ -475,17 +491,23 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         iceberg_dir_name = f"iceberg_raw_data_{data_year}"
         iceberg_dir_name = os.path.join(data_dir, "raw_data", iceberg_dir_name)
         if not(os.path.exists(iceberg_dir_name)):
+            start = time.time()
             download_original_files_from_cmems(output_dir = iceberg_dir_name,
                                             data_year =  data_year,
                                             dataset =    "DMI-ARC-SEAICE_BERG-L4-NRT-OBS")
+            end = time.time()
+            logger.debug(f"Iceberg download took {end-start} seconds")
 
         #Get average annual iceberg density
         logger.info("Processing iceberg data")
         iceberg_mean_density_name = f"iceberg_annual_data_{data_year}.tif"
         iceberg_mean_density_name = os.path.join(data_dir, "iceberg_annual_data", iceberg_mean_density_name)
         if not(os.path.exists(iceberg_mean_density_name)):
+            start = time.time()
             process_iceberg_data(input_dir =    iceberg_dir_name,
                                 output_file =  iceberg_mean_density_name)
+            end = time.time()
+            logger.debug(f"Iceberg processing took {end-start} seconds")
 
         #Cleanup files
         if clean:
@@ -513,48 +535,63 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         logger.info(f"Sea surface temperature data already exists for {data_year}. Skipping download.")
     else:
         logger.info(f"Downloading sea surface temperature data for {data_year}")
+        start = time.time()
         download_from_cds(output_file =   sea_surface_temp_netcdf_name, 
                         data_year =     data_year,
                         dataset =       "derived-era5-single-levels-daily-statistics", 
                         variables =     ["sea_surface_temperature"])
+        end = time.time()
+        logger.debug(f"Sea surface temperature download took {end-start} seconds")
     
     #Wind Speed Data
     if os.path.exists(wind_speed_u_netcdf_name):
         logger.info(f"U component wind speed data already exists for {data_year}. Skipping download.")
     else:
         logger.info(f"Downloading U component wind speed data for {data_year}")
+        start = time.time()
         download_from_cds(output_file =   wind_speed_u_netcdf_name, 
                         data_year =     data_year,
                         dataset =       "derived-era5-single-levels-daily-statistics", 
                         variables =     ["10m_u_component_of_wind"])
+        end = time.time()
+        logger.debug(f"U component wind speed download took {end-start} seconds")
     if os.path.exists(wind_speed_v_netcdf_name):
         logger.info(f"V component wind speed data already exists for {data_year}. Skipping download.")
     else:
         logger.info(f"Downloading V component wind speed data for {data_year}")
+        start = time.time()
         download_from_cds(output_file =   wind_speed_v_netcdf_name, 
                         data_year =     data_year,
                         dataset =       "derived-era5-single-levels-daily-statistics", 
                         variables =     ["10m_v_component_of_wind"])
+        end = time.time()
+        logger.debug(f"V component wind speed download took {end-start} seconds")
     
     #Air Temperature Data
     if os.path.exists(air_temp_netcdf_name):
         logger.info(f"Air temperature data already exists for {data_year}. Skipping download.")
     else:
         logger.info(f"Downloading air temperature data for {data_year}")
+        start = time.time()
         download_from_cds(output_file =   air_temp_netcdf_name, 
                         data_year =     data_year,
                         dataset =       "derived-era5-single-levels-daily-statistics", 
                         variables =     ["2m_temperature"])
+        end = time.time()
+        logger.debug(f"Air temperature download took {end-start} seconds")
     
     #Sea Ice Cover Data
     if os.path.exists(sea_ice_cover_netcdf_name):
         logger.info(f"Sea ice cover data already exists for {data_year}. Skipping download.")
     else:
         logger.info(f"Downloading sea ice cover data for {data_year}")
+        start = time.time()
         download_from_cds(output_file =   sea_ice_cover_netcdf_name, 
                         data_year =     data_year,
                         dataset =       "derived-era5-single-levels-daily-statistics", 
                         variables =     ["sea_ice_cover"])
+        end = time.time()
+        logger.debug(f"Sea ice cover download took {end-start} seconds")
     
 
     #Open Datasets#
@@ -625,6 +662,7 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         heavy_icing_days = np.zeros([raster_y_size, raster_x_size])
         extreme_icing_days = np.zeros([raster_y_size, raster_x_size])
         
+        start = time.time()
         for band_num in tqdm(range(1, num_bands+1)):
             sea_surface_temp = sea_surface_temp_dataset.GetRasterBand(band_num).ReadAsArray()
             wind_speed_U = wind_speed_U_dataset.GetRasterBand(band_num).ReadAsArray()
@@ -643,6 +681,8 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             moderate_icing_days += np.where(np.isnan(icing_predictor), np.nan, (icing_predictor > MODERATE_ICING_THRESH)) #Count days with moderate or greater icing
             heavy_icing_days += np.where(np.isnan(icing_predictor), np.nan, (icing_predictor > HEAVY_ICING_THRESH)) #Count days with heavy or greater icing
             extreme_icing_days += np.where(np.isnan(icing_predictor), np.nan, icing_predictor > EXTREME_ICING_THRESH) #Count days with extreme icing
+        end = time.time()
+        logger.debug(f"Icing predictor calculation took {end-start} seconds")
 
         
         #Create output files
