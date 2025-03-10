@@ -12,11 +12,10 @@ Data Acknowledgement: Data downloaded are provided by GHRSST, Met Office and CME
 """
 
 import copernicusmarine
-from osgeo import gdal
+from osgeo import gdal, osr
 import os
 import numpy as np
 import logging
-from osgeo_utils import gdal_calc
 import calendar
 import shutil
 from datetime import datetime
@@ -24,6 +23,10 @@ import argparse
 import cdsapi
 from tqdm import tqdm
 import time
+import tempfile
+import geopandas as gpd
+import pandas as pd
+import subprocess
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -328,6 +331,143 @@ def process_iceberg_data(input_dir=None,
     logger.info(f"Finished processing iceberg data. Output file is {output_file}")
     return(output_file)
 
+
+def process_excel_iceberg_data(input_dir=None, 
+                               output_file=None, 
+                               data_year=None,
+                               reference_tif="oilco_iceberg_data/fallback_cmems_raster.tif"):
+    """Generates geoTIFF and shapefile of the mean annual iceberg density for oilco data.
+
+    Args:
+        input_iceberg_file (str, optional): _description_. Defaults to "Iceberg_Oilco_Insight_CellAll_V1_Final_2022.xlsx".
+        shapefile_path (str, optional): _description_. Defaults to "Oilco_Insight_Grid_Cells/Metocean_Nalcor_Mar31.shp".
+        data_year (_type_, optional): _description_. Defaults to None.
+    """
+
+    input_iceberg_file = os.path.join(input_dir, "Iceberg_Oilco_Insight_CellAll_V1_Final_2022.xlsx")
+    ice_density_df = pd.read_excel(input_iceberg_file)
+    logger.info("Done.")
+
+    # Drop unrelated columns
+    ice_density_df = ice_density_df.drop(columns=["AD_ESAT", "AD_Aerial", "AD_Sentinel"])
+    # If any values are missing fill them with nan
+    ice_density_df["AD_All"] = ice_density_df["AD_All"].fillna(np.nan)
+    
+    # Group by cell id and year and average the ice concentration per year per cell
+    mean_ice_concentration_df = (
+            ice_density_df.groupby(["Cell_ID", "Year"])
+            .agg(Avg_AD_All = ("AD_All", lambda x: x.mean(skipna=True)))
+            .reset_index()
+    )
+    # Replace nan values with zero
+    mean_ice_concentration_df["Avg_AD_All"] = mean_ice_concentration_df["Avg_AD_All"].fillna(0)
+    # In preperation of merging with the shapefile that uses the term cell name instead of cell id
+    mean_ice_concentration_df.rename(columns={"Cell_ID": "Cell_Name"}, inplace=True)
+
+    # Filter the data for a specific year only
+    df_selected_year = mean_ice_concentration_df[mean_ice_concentration_df["Year"] == data_year]
+    # icebergs/1km^2 -> icebergs/100km^2
+    df_selected_year["Avg_AD_All"] = df_selected_year["Avg_AD_All"] * 100 
+    logger.info("Reading oilco shapefile...")
+
+    shapefile_path = os.path.join(input_dir, "oilco_shapefile_dir/Metocean_Nalcor_Mar31.shp")
+    shapefile_gdf = gpd.read_file(filename=shapefile_path)
+    logger.info("Done.")
+   
+    # If the shapefile does not have a crs set it to EPSG:4326
+    if shapefile_gdf.crs is None or shapefile_gdf.crs == "":
+        shapefile_gdf = shapefile_gdf.set_crs("EPSG:4326")
+
+    shapefile_gdf = shapefile_gdf.merge(df_selected_year, on="Cell_Name", how="left")
+    
+    temp_dir = tempfile.mkdtemp()
+    updated_shapefile = os.path.join(temp_dir, f"oilco_mean_iceberg_density_{data_year}.shp")
+    shapefile_gdf.to_file(updated_shapefile)
+
+    #final_iceberg_concentration_file = f"oilco_mean_iceberg_density_raster_{data_year}.tif"
+    resolution = 0.1 
+    # Apply shapefile geometry to dataframe and generate raster geotiff
+    gdal.Rasterize(output_file, 
+                updated_shapefile,
+                format="GTiff",
+                attribute="Avg_AD_All",
+                xRes=resolution, yRes=resolution,
+                outputType=gdal.GDT_Float32)
+    
+    shutil.rmtree(temp_dir)    
+    
+    ds_oilco = gdal.Open(output_file, gdal.GA_Update)
+    if ds_oilco is None:
+        raise RuntimeError(f"Could not open {output_file} for update to fix metadata.")
+
+    # Enforce crs to be EPSG:4326 since the data is lat/long. Currently unknown/lambert conic
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput("EPSG:4326")
+    ds_oilco.SetProjection(srs.ExportToWkt())
+    ds_oilco.FlushCache()
+    del ds_oilco
+    logger.info(f"Forced {output_file} to EPSG:4326 (lat/lon).")
+
+    logger.info(f"Warping {output_file} to match {reference_tif} projection.")
+    warp_oilco_to_cmems(
+        oilco_in=output_file,
+        cmems_in=reference_tif,
+        oilco_out=output_file,
+        dst_nodata=-1
+    )
+    logger.info(f"Warp complete => final Lambert Conic in {output_file}")
+
+
+def get_cmems_params(cmems_path="oilco_iceberg_data/fallback_cmems_raster.tif"):
+    ds = gdal.Open(cmems_path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise FileNotFoundError(f"Could not open {cmems_path}")
+    
+    projection_wkt = ds.GetProjection()
+
+    gt = ds.GetGeoTransform()
+    
+    xres = abs(gt[1])  
+    yres = abs(gt[5])
+    
+    del ds
+    return projection_wkt, xres, yres
+
+
+def warp_oilco_to_cmems(oilco_in, cmems_in, oilco_out, dst_nodata=-1):
+
+    projection_wkt, x_resolution_cmems, y_resolution_cmems = get_cmems_params(cmems_in)
+
+    warp_options = gdal.WarpOptions(dstSRS=projection_wkt, xRes=x_resolution_cmems, yRes=y_resolution_cmems, dstNodata=dst_nodata, resampleAlg="near")
+
+    out_ds = gdal.Warp(oilco_out, oilco_in, options=warp_options)
+    del out_ds
+    
+    return oilco_out
+
+
+def mosaic_with_cmems(warped_oilco_file, cmems_file, output_mosaic_file, nodata=-1):
+    
+    os.environ["CHECK_DISK_FREE_SPACE"] = "FALSE"
+    
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as temp_output:
+        temp_output_file = temp_output.name
+    
+    cmd = [
+        "gdal_merge.py",
+        "-o", temp_output_file,
+        "-n", str(nodata),
+        "-a_nodata", str(nodata),
+        warped_oilco_file,   
+        cmems_file        
+    ]
+    subprocess.run(cmd, check=True)
+    
+    shutil.move(temp_output_file, output_mosaic_file)
+    
+    return output_mosaic_file
+
+
 def download_and_preprocess_data(data_year = datetime.today().year-1,
                                  data_dir =  os.path.join(os.getcwd(), "data"),
                                  clean = True):
@@ -372,6 +512,8 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     OLDEST_SEA_ICE_DATA_YEAR = 2007
     OLDEST_ICEBERG_DATA_YEAR = 2020
     OLDEST_CDS_DATA_YEAR = 1940
+    OLDEST_OILCO_ICEBERG_DATA_YEAR = 1998
+    NEWEST_OILCO_ICEBERG_DATA_YEAR = 2021
     
     # Note on Salinity data: This data is used to calculate Tf, the freezing point of seawater, but after a brief time searching online, 
     # I couldn't find a universally agreed upon formula for salinity dependant freezing point.
@@ -391,7 +533,7 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         os.mkdir(os.path.join(data_dir, "iceberg_annual_data"))
     if not os.path.exists(os.path.join(data_dir, "icing_predicor_annual_data")):
         os.mkdir(os.path.join(data_dir, "icing_predictor_annual_data"))
-    
+   
 
     ###################################
     ##Surface Wave Significant Height##
@@ -444,7 +586,7 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         logger.info(f"Wave Height data is only available from the year {OLDEST_WAVE_HEIGHT_DATA_YEAR} onward. Not available for {data_year}. Skipping Wave Height data download")
 
     #########################
-    ##Sea ice conecntration##
+    ##Sea ice concentration##
 
     if (int(data_year) >= OLDEST_SEA_ICE_DATA_YEAR):
         #Download current year dataset
@@ -484,7 +626,6 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
 
     ################
     ##Iceberg data##
-
     if (int(data_year) >= OLDEST_ICEBERG_DATA_YEAR):
         #Download Current Year Data
         logger.info(f"Downloading Iceberg Data")
@@ -515,6 +656,7 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             shutil.rmtree(os.path.join(data_dir, "raw_data"))
 
         logger.info("Finished processing iceberg data")
+
     else:
         logger.info(f"Iceberg data is only available from the year {OLDEST_ICEBERG_DATA_YEAR} onward. Not available for {data_year}. Skipping Iceberg data download")
 
@@ -729,6 +871,40 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         logger.info(f"Finished calculating daily icing predictor values for {data_year}")
         return(data_dir)
 
+
+    if (int(data_year) >= OLDEST_OILCO_ICEBERG_DATA_YEAR and int(data_year) <= NEWEST_OILCO_ICEBERG_DATA_YEAR):
+        logger.info("Reading oilco ice density excel data...")
+        
+        oilco_data_dir = "oilco_iceberg_data"
+        oilco_iceberg_mean_density_name = f"oilco_iceberg_annual_data_{data_year}.tif"
+        oilco_iceberg_mean_density_name = os.path.join(oilco_data_dir, oilco_iceberg_mean_density_name)
+        
+        if not(os.path.exists(oilco_iceberg_mean_density_name)):
+            process_excel_iceberg_data(input_dir = oilco_data_dir,
+                                    output_file = oilco_iceberg_mean_density_name,
+                                    data_year = int(data_year))
+        else:
+            logger.info(f"{oilco_iceberg_mean_density_name} already exists.")
+    else:
+        logger.info(f"No Oilco data for year {data_year} (valid range is 1998-2021)")
+        
+           
+    cmems_tif = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_annual_data_{data_year}.tif")
+    oilco_tif = os.path.join("oilco_iceberg_data", f"oilco_iceberg_annual_data_{data_year}.tif")     
+    
+    # Only overlap over 2020-2021
+    if os.path.exists(cmems_tif) and os.path.exists(oilco_tif):
+        logger.info(f"Merging Oilco & CMEMS iceberg rasters found for {data_year}...")
+        cmems_tif = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_annual_data_{data_year}.tif")
+        mosaic_with_cmems(oilco_tif, cmems_tif, cmems_tif, nodata=-1)
+        logger.info("Mosaic created!")
+    else:
+        logger.info("No overlapping Oilco & CMEMS data to merge or only one dataset is available.")
+    
+    return(data_dir)
+        
+        
+        
 ##########
 ###MAIN###
 ##########
