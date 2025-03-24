@@ -8,6 +8,7 @@ botocore
 Brotli
 cachier
 certifi
+cdsapi
 cftime
 charset-normalizer
 click

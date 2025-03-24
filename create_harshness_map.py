@@ -85,7 +85,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
                         clean = True):
     """Calculates a harshness index given by <formula> using the input data defined by input parameters.
     Input annual data files are found in <data_dir>.
-    Files containging data between <start_year> and <end_year> for the given <wave_height_thresh> and <sea_ice_concentration_thresh> are averaged together to generate the input parameters for <formula>
+    Files containging data between <start_year> and <end_year> for the given <wave_height_thresh>, <sea_ice_concentration_thresh>, and <icing_thresh> are averaged together to generate the input parameters for <formula>
     The resulting harshness map is generated in EPSG:4326 at a resolution <x_resolution> x <y_resolution> degrees for the region defined in <bounds>
     The harshness map is saved as a Geotiff in "<data_dir>/harshness_maps/" with the name:
     "harshness_<start_year>_<end_year>_<wave_height_thresh>_<sea_ice_concentration_thresh>_<icing_thresh>_<x_resolution>_<y_resolution>_<bounds>.tif"
@@ -145,7 +145,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
             iceberg_file = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_annual_data_{data_year}.tif")
             assert os.path.exists(iceberg_file), f"Annual data file in given date range does not exist: {iceberg_file}."
             iceberg_files.append(iceberg_file)
-            icing_file = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_{data_year}_{icing_thresh}_icing.tif")
+            icing_file = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_{icing_thresh}_icing.tif")
             assert os.path.exists(icing_file), f"Annual data file in given date range does not exist: {icing_file}."
             icing_files.append(icing_file)
         except AssertionError as a:
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--wave_height_thresh", help="Used to define wave input files. Input files contain # of days with wave height > <wave_height_thresh> metres. (int 1-10)")
     parser.add_argument("--sea_ice_concentration_thresh", help="Used to define sea ice input files. Input files contain # of days with sea ice concentration > <sea_ice_concentration_thresh> percent. (int 0-90 by 10s)")
     parser.add_argument("--icing_thresh", help="The threshold for the icing predictor index. Options are 'light', 'moderate', 'heavy', or 'extreme'. (str)")
-    parser.add_argument("--formula", help="The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data. (str)")
+    parser.add_argument("--formula", help="The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data, P = Icing Predictor Index Data. (str)")
     parser.add_argument("--x_resolution", help="Resolution of the output file in degrees longitude. (float)")
     parser.add_argument("--y_resolution", help="Resolution of the output file in degrees latitude. (float)")
     parser.add_argument("--lon_min", help="The minimum longitude bound of the output file in degrees. (float)")
