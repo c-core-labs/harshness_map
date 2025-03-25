@@ -674,6 +674,15 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     #######################
     #Icing Predictor Index#
     
+    #Check for .cdsapirc file  - required to download from CDS
+    expected_cdsapirc_path = os.path.join(os.path.expanduser('~'), ".cdsapirc")
+    if not(os.path.exists(expected_cdsapirc_path)):
+        archived_cdsapirc_path = os.path.join(data_dir, ".cdsapirc")
+        try:
+            shutil.copy(archived_cdsapirc_path, expected_cdsapirc_path)
+        except FileNotFoundError as e:
+            logger.error(".cdsapirc file must be created in data directory for CDS downloads to proceed")
+        
     #Name output files
     no_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_no_icing.tif")
     light_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_light_icing.tif")
@@ -688,16 +697,10 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     and os.path.exists(extreme_icing_geotiff_name):
         logger.info(f"Icing predictor maps already exist for {data_year}. Skipping Icing Predictor processing.")
     
-    else:
-        #Check for .cdsapirc file  - required to download from CDS
-        expected_cdsapirc_path = os.path.join(os.path.expanduser('~'), ".cdsapirc")
-        if not(os.path.exists(expected_cdsapirc_path)):
-            archived_cdsapirc_path = os.path.join(data_dir, ".cdsapirc")
-            try:
-                shutil.copy(archived_cdsapirc_path, expected_cdsapirc_path)
-            except FileNotFoundError as e:
-                logger.warn(".cdsapirc file not found. Downloads from CDS will not be possible without authentication")
-
+    elif not(os.path.exists(expected_cdsapirc_path)):
+        logger.info(f".cdsapirc file not found. Skipping Icing Predictor processing.")
+    
+    else:       
         #Download datasets#
         
         sea_surface_temp_netcdf_name = os.path.join(data_dir, "raw_data", f"sea_surface_temperature_{data_year}.nc")
