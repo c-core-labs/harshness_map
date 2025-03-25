@@ -11,22 +11,23 @@ Additionally, relevant data is downloaded from Copernicus Climate Data Service i
 Data Acknowledgement: Data downloaded are provided by GHRSST, Met Office and CMEMS, as well as CDS
 """
 
-import copernicusmarine
 from osgeo import gdal, osr
 import os
 import numpy as np
 import logging
-import calendar
 import shutil
 from datetime import datetime
 import argparse
-import cdsapi
 from tqdm import tqdm
 import time
 import tempfile
 import geopandas as gpd
 import pandas as pd
 import subprocess
+from cmems_utils import download_from_cmems, download_original_files_from_cmems
+from cds_utilos import download_from_cds
+from utils import count_bands_greater_than_thresh
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -35,130 +36,6 @@ logging.basicConfig(level=logging.INFO)
 ###Function Definitions###
 ##########################
 
-def num_days_in_year(year=None):
-    """Returns the number of days in a given year
-    Parameters:
-        year (int)
-    Returns:
-        number_of_days (int)"""
-    return 365 + calendar.isleap(year)
-
-def download_from_cmems(output_file=None, 
-                        data_year=None, 
-                        dataset=None, 
-                        variables=None):
-    """Downloads data from the Copernicus Marine Service using copernicusmarine.subset().
-    Parameters:
-        output_file (str): File path where the downloaded dataset will be stored. Must be a NetCDF (.nc) file.
-        data_year (int): The dataset will contain data from Jan 1 to Dec 31 of this year.
-        dataset (str): The name of the CMEMs dataset to download.
-        variables (list[str]): A list of variables to download from the dataset.
-    Returns:
-        output_file (str)"""
-    if not os.path.exists(output_file):
-        data_year_start = f"{data_year}-01-01"
-        data_year_end = f"{data_year}-12-31T21:00:00"
-        logger.info(f"Downloading {data_year} {dataset} from Copernicus Marine")
-        try:
-            copernicusmarine.subset(dataset_id = dataset, 
-                                    variables = variables, 
-                                    start_datetime = data_year_start, 
-                                    end_datetime = data_year_end, 
-                                    output_directory = os.path.dirname(output_file), 
-                                    output_filename = os.path.basename(output_file), 
-                                    credentials_file=os.path.join(data_dir, ".copernicusmarine-credentials"))
-            logger.info(f"Download complete: {output_file}")
-        except Exception as e:
-            logger.error(f"Download failed: {e}")
-            os.remove(output_file)
-            raise e
-
-    else: #File already downloaded
-        logger.info(f"{output_file} already exists. Skipping download")
-    return(output_file)
-
-def download_original_files_from_cmems(output_dir=None, 
-                                       data_year=None, 
-                                       dataset=None):
-    """Downloads individual data files from the Copernicus Marine Service using copernicusmarine.get().
-    This function should be used inplace of download_from_cmems for datasets that do not yet support the copernicusmarine.subset function.
-    Parameters:
-        output_dir (str): Path to the directory where the downloaded data files will be stored.
-        data_year (int): The dataset will contain data from Jan 1 to Dec 31 of this year.
-        dataset (str): The name of the CMEMs dataset to download.
-    Returns:
-        output_dir (str)"""
-    if not os.path.exists(output_dir):
-        logger.info(f"Downloading {data_year} {dataset} from Copernicus Marine")
-        copernicusmarine.get(dataset_id = dataset, 
-                             filter = f"*_{data_year}*",
-                             output_directory = output_dir, 
-                             no_directories = True,
-                             force_download = True,
-                             credentials_file=os.path.join(data_dir, ".copernicusmarine-credentials"))
-        logger.info(f"Download complete: {output_dir}")
-    else: #File already downloaded
-        logger.info(f"{output_dir} already exists. Skipping download")    
-    return(output_dir)
-
-def download_from_cds(output_file=None,
-                      data_year=None, 
-                      dataset=None, 
-                      variables=None):
-    """Downloads data from the Copernicus Climate Data Service using the cdsapi.
-    Parameters:
-        output_file (str): File path where the downloaded dataset will be stored. Must be a NetCDF (.nc) file.
-        data_year (int): The dataset will contain data from Jan 1 to Dec 31 of this year.
-        dataset (str): The name of the CDS dataset to download.
-        variables (list[str]): A list of variables to download from the dataset.
-    Returns:
-        output_file (str)"""
-    
-    if not os.path.exists(output_file):
-        
-        logger.info(f"Downloading {data_year} {dataset} {variables} from Copernicues Climate Data Store")
-
-        try:
-            client = cdsapi.Client()
-            request = {
-                "product_type": "reanalysis",
-                "variable": variables,
-                "year": data_year,
-                "month": [
-                    "01", "02", "03",
-                    "04", "05", "06",
-                    "07", "08", "09",
-                    "10", "11", "12"
-                ],
-                "day": [
-                    "01", "02", "03",
-                    "04", "05", "06",
-                    "07", "08", "09",
-                    "10", "11", "12",
-                    "13", "14", "15",
-                    "16", "17", "18",
-                    "19", "20", "21",
-                    "22", "23", "24",
-                    "25", "26", "27",
-                    "28", "29", "30",
-                    "31"
-                ],
-                "daily_statistic": "daily_mean",
-                "time_zone": "utc+00:00",
-                "frequency": "1_hourly"
-            }
-            client.retrieve(dataset, request, output_file)
-            logger.info(f"Download complete: {output_file}")
-            
-        except Exception as e:
-            logger.error(f"Download failed: {e}")
-            os.remove(output_file)
-            raise e
-    
-    else: #File already downloaded
-        logger.info(f"{output_file} already exists. Skipping download")
-        
-    return(output_file)
 
 def get_waves_daily_averages(input_file=None, 
                              output_file=None):
@@ -212,88 +89,7 @@ def get_waves_daily_averages(input_file=None,
     del daily_averages_raster #Close the file after writing
     return(output_file)
 
-def get_average_raster(input_files = [],
-                       output_file = None):
-    """Calculates the mean of all rasters in the list <input_files> and writes the result to <output_file>.
-    Parameters:
-        input_files (list[str]): A list of paths to input raster files to be averaged. All rasters must be the same size, geo_transform, and projection.
-        output_file (str): The path to the file in which the averaged raster will be saved. Must be a Geotiff.
-    Returns: 
-        output_file (str)"""
-    data = []
-    raster_x_size = None
-    raster_y_size = None
-    raster_geo_transform = None
-    raster_projection = None
-    raster_data_type = gdal.GDT_Float32
-    logger.info(f"Calculating average of {len(input_files)} rasters.")
-    for file in input_files:
-        with gdal.Open(file) as gdal_dataset:
-            band = gdal_dataset.GetRasterBand(1)
-            band_data = band.ReadAsMaskedArray()
-            data.append(band_data)
-            if not(raster_x_size): #Just need to do this once
-                raster_x_size = gdal_dataset.RasterXSize
-                raster_y_size = gdal_dataset.RasterYSize
-                raster_geo_transform = gdal_dataset.GetGeoTransform()
-                raster_projection = gdal_dataset.GetProjection()
-            else:
-                assert raster_x_size == gdal_dataset.RasterXSize, "Raster files are not the same size."
-                assert raster_y_size == gdal_dataset.RasterYSize, "Raster files are not the same size."
-                assert raster_geo_transform == gdal_dataset.GetGeoTransform(), "Raster files are not of the same geotransform."
-                assert raster_projection == gdal_dataset.GetProjection(), "Raster files are not in the same projection." 
-    mean_data = np.ma.mean(data, axis=0)
-    mean_data = np.ma.masked_array(mean_data, fill_value=-1)
-    mean_data = mean_data.filled()
-    output_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
-    output_raster.SetGeoTransform(raster_geo_transform)
-    output_raster.SetProjection(raster_projection)
-    output_raster.GetRasterBand(1).SetNoDataValue(-1)
-    output_raster.GetRasterBand(1).WriteArray(mean_data)
-    del output_raster
-    logger.info(f"Finished averageing rasters. Output file is {output_file}")
-    return output_file
 
-
-def count_bands_greater_than_thresh(input_file=None, 
-                                    output_file=None, 
-                                    thresh=None):
-    """Counts the number of bands with pxel values greater than a given threshold, given an input raster file with multiple bands and saves the output to <output_file>.
-    Parameteres:
-        input_file (str): File path to a raster file containging multiple bands of data.
-        output_file (str): File path to an output Geotiff file containging a single band with the counts of input bands > thresh.
-        thresh (float): The threshold to compare input raster bands to.
-    Returns:
-        output_file (str)"""
-    with gdal.Open(input_file) as input_raster:
-        raster_x_size = input_raster.RasterXSize
-        raster_y_size = input_raster.RasterYSize
-        raster_geo_transform = input_raster.GetGeoTransform()
-        raster_projection = input_raster.GetProjection()
-        raster_no_data_value = input_raster.GetRasterBand(1).GetNoDataValue()
-        
-        rows_per_chunk = 10 #TODO: Make this a parameter or optimize
-        output_data_array = np.empty((0, raster_x_size), dtype=np.uint16)
-        
-        for y_off in range(0, raster_y_size, rows_per_chunk):
-            y_size = min(rows_per_chunk, raster_y_size - y_off)
-            input_data_array = input_raster.ReadAsArray(xoff=0, yoff=y_off, xsize=raster_x_size, ysize=y_size)
-            input_data_array = np.ma.masked_values(input_data_array, raster_no_data_value) #Mask out nodata value
-            chunk_output = np.ma.sum((input_data_array > thresh), axis=0) #Count bands with value greater than threshold
-            chunk_output = np.ma.masked_array(chunk_output, fill_value=-1).filled() #Fill with new nodata value of -1
-            output_data_array = np.vstack((output_data_array, chunk_output))
-            del input_data_array
-            del chunk_output            
-        
-    raster_data_type = gdal.GDT_UInt16
-    output_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, 1, raster_data_type)
-    output_raster.SetGeoTransform(raster_geo_transform)
-    output_raster.SetProjection(raster_projection)
-    output_raster.GetRasterBand(1).SetNoDataValue(-1)
-    output_raster.GetRasterBand(1).WriteArray(output_data_array)
-    del output_data_array
-    print(f"Finished counting bands > {thresh} with numpy. Output file is {output_file}")
-    return(output_file)
 
 def process_iceberg_data(input_dir=None, 
                          output_file=None):
@@ -521,6 +317,7 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
     OLDEST_CDS_DATA_YEAR = 1940
     OLDEST_OILCO_ICEBERG_DATA_YEAR = 1998
     NEWEST_OILCO_ICEBERG_DATA_YEAR = 2021
+    CMEMS_CREDENTIALS_FILE = os.path.join(data_dir, ".copernicusmarine-credentials")
     
     # Note on Salinity data: This data is used to calculate Tf, the freezing point of seawater, but after a brief time searching online, 
     # I couldn't find a universally agreed upon formula for salinity dependant freezing point.
@@ -557,10 +354,11 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             waves_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", waves_raw_data_netcdf_name)
             if not(os.path.exists(waves_raw_data_netcdf_name)):
                 start = time.time()
-                download_from_cmems(output_file =   waves_raw_data_netcdf_name, 
-                                    data_year =     data_year, 
-                                    dataset =       "cmems_mod_glo_wav_my_0.2deg_PT3H-i", 
-                                    variables =     ["VHM0"])
+                download_from_cmems(output_file =       waves_raw_data_netcdf_name, 
+                                    data_year =         data_year, 
+                                    dataset =           "cmems_mod_glo_wav_my_0.2deg_PT3H-i", 
+                                    variables =         ["VHM0"],
+                                    credentials_file =  CMEMS_CREDENTIALS_FILE)
                 end = time.time()
                 logger.info(f"Waves download took {end-start} seconds")
 
@@ -612,7 +410,8 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
                 download_from_cmems(output_file =   sea_ice_raw_data_netcdf_name,
                                     data_year =     data_year, 
                                     dataset =       "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2", 
-                                    variables =     ["sea_ice_fraction"])
+                                    variables =     ["sea_ice_fraction"],
+                                    credentials_file =  CMEMS_CREDENTIALS_FILE)
                 end = time.time()
                 logger.info(f"Sea ice download took {end-start} seconds")
 
@@ -651,7 +450,8 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
                 start = time.time()
                 download_original_files_from_cmems(output_dir = iceberg_dir_name,
                                                 data_year =  data_year,
-                                                dataset =    "DMI-ARC-SEAICE_BERG-L4-NRT-OBS")
+                                                dataset =    "DMI-ARC-SEAICE_BERG-L4-NRT-OBS",
+                                                credentials_file =  CMEMS_CREDENTIALS_FILE)
                 end = time.time()
                 logger.info(f"Iceberg download took {end-start} seconds")
 
