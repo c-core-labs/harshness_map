@@ -87,6 +87,7 @@ docker run --rm -it -v $PWD/data:/app/data harshness_map python -m create_harshn
 --data_dir="./data" \
 --wave_height_thresh=2 \
 --sea_ice_concentration_thresh=0.2 \
+--icing_thresh="moderate" \
 --formula="4*S/350 + 4*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40)) + 0.5*P/200" \
 --x_resolution=0.4 \
 --y_resolution=0.4 \
@@ -130,15 +131,15 @@ Or, you may not want to consider iceberg data at all, and include the icing pred
 Of course, the formula is completely customizable, so feel free to experiment, here is an example of an acceptable (though probably non-sensical) formula:  
 `S*W + (S>W/10) * I/10 + I/100 + P*W/15`  
 If you are interested in viewing only a singe variable, you can use single variable formulas as well:  
-`S`
-`W`
-`I`
-`P`
+`S`  
+`W`  
+`I`  
+`P`  
 
 ## Icing Predictor Index
 The icing predictor index is a single parameter which takes sea surface temperature, wind speed, air temperature, and sea ice concentration data into account to provide a prediction of vessel icing rates in different ocean regions.  
 
-The icing predictor index, PR, is calculated using the following formula:
+The Icing Predictor Index is calculated using the following formula:
 
 `[Va * (Tf-Ta)] / [1 + 0.3*(Tw-Tf)]`
 
@@ -150,10 +151,10 @@ Where,
 
 Icing Predictor values are categorized into the following levels:
 PR less than or equal to 0:  no icing  
-PR between 0 and 22:         light icing (icing rate < 0.7 cm/hour)
-PR between 22 and 53:        moderate icing (icing rate between 0.7-2.0 cm/hour)
-PR between 53 and 83:        heavy icing (icing rate between 2.0-4.0 cm/hour)
-PR greater than 83:          extreme icing (icing rate > 4.0 cm/hour)
+PR between 0 and 22:         light icing (icing rate < 0.7 cm/hour)  
+PR between 22 and 53:        moderate icing (icing rate between 0.7-2.0 cm/hour)  
+PR between 53 and 83:        heavy icing (icing rate between 2.0-4.0 cm/hour)  
+PR greater than 83:          extreme icing (icing rate > 4.0 cm/hour)  
 
 ## Data Acknowledgement
 Data utilized in this project are provided by GHRSST, Met Office, CMEMS, and CDS
