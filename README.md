@@ -4,9 +4,10 @@
 
 1. If not already installed, [download and install Docker](https://docs.docker.com/engine/install/)
 2. From the directory you would like to install the Harshness Map package `git clone https://github.com/c-core-labs/harshness_map.git`
-3. In the *harshness_map* directory, create a file called .cdsapirc and populate it with your Copernicus Clmate Data Service API URL and Key as per Step 1 here: https://cds.climate.copernicus.eu/how-to-api
-4. From the *harshness_map* directory `docker build -t harshness_map .`
-5. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v $PWD/data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
+3. From the *harshness_map* directory `docker build -t harshness_map .`
+4. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v $PWD/data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
+5. In the *harshness_map/data* directory, create a file called .cdsapirc and populate it with your Copernicus Climate Data Service API URL and Key as per Step 1 here: https://cds.climate.copernicus.eu/how-to-api
+
 
 ## Downloading and Preprocessing Annual Data
 The `get_harshness_data` script is used to download annual wave height, sea ice concentration, iceberg density, sea surface temperature, air temperature and wind speed data

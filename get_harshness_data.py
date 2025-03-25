@@ -689,8 +689,17 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
         logger.info(f"Icing predictor maps already exist for {data_year}. Skipping Icing Predictor processing.")
     
     else:
-        #Download datasets#
+        #Check for .cdsapirc file  - required to download from CDS
+        expected_cdsapirc_path = os.path.join(os.path.expanduser('~'), ".cdsapirc")
+        if not(os.path.exists(expected_cdsapirc_path)):
+            archived_cdsapirc_path = os.path.join(data_dir, ".cdsapirc")
+            try:
+                shutil.copy(archived_cdsapirc_path, expected_cdsapirc_path)
+            except FileNotFoundError as e:
+                logger.warn(".cdsapirc file not found. Downloads from CDS will not be possible without authentication")
 
+        #Download datasets#
+        
         sea_surface_temp_netcdf_name = os.path.join(data_dir, "raw_data", f"sea_surface_temperature_{data_year}.nc")
         wind_speed_u_netcdf_name = os.path.join(data_dir, "raw_data", f"wind_speed_u_{data_year}.nc")
         wind_speed_v_netcdf_name = os.path.join(data_dir, "raw_data", f"wind_speed_v_{data_year}.nc")

@@ -37,8 +37,6 @@ RUN pip install --no-cache gdal[numpy]==3.9.1
 COPY ./create_harshness_map.py .
 COPY ./get_harshness_data.py .
 
-WORKDIR /root
-COPY .cdsapirc .
 
 RUN mkdir /app/data
 RUN mkdir /app/data/harshness_maps 
