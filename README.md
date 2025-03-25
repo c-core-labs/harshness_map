@@ -9,12 +9,12 @@
 5. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v $PWD/data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
 
 ## Downloading and Preprocessing Annual Data
-The `get_harshness_data` script is used to download annual wave height, sea ice concentration, and iceberg density data
-from Copernicus Marine Service, and compute the parameters to be used in the computation of the 
-Fleming-Drover Harshness Index as follows:
+The `get_harshness_data` script is used to download annual wave height, sea ice concentration, iceberg density, sea surface temperature, air temperature and wind speed data
+from Copernicus Marine Service, and compute the parameters to be used in the computation of Harshness Index formulas as follows:
 1. The mean annual number of days with a significant wave height greater than a given threshold (1-10 metres)
 2. The mean annual number of days with a sea ice concentration greater than a given threshold (0-90 percent in increments of 10)
 3. The mean annual open water iceberg areal density (# of icebergs per 100 km^2)
+4. The mean annual number of days with an Icing Predictor Index greater than a given threshold (light, moderate, heavey, or extreme icing) *More information on the Icing Predictor Index below
 
 ### To Run
 1. From the *harshness_map* directory `docker run --rm -it -v $PWD/data:/app/data harshness_map python -m get_harshness_data`
@@ -39,7 +39,7 @@ docker run --rm -it -v $PWD/data:/app/data harshness_map python -m get_harshness
 --clean=True
 ```
 ## Creating a Harshness Map
-The `create_harshness_map` script is used to generate harshness maps from Wave Height, Sea Ice Concentration, and Iceberg Density data.
+The `create_harshness_map` script is used to generate harshness maps from Wave Height, Sea Ice Concentration, Iceberg Density, and Icing Predictor data.
 By default the Fleming-Drover Harshness Index is used, but users may specify custom formulas for harshness calculations.
 
 ### To Run
@@ -51,7 +51,8 @@ By default the Fleming-Drover Harshness Index is used, but users may specify cus
 `--data_dir` The parent directory containing the directories 'iceberg_annual_data', 'waves_annual_data', and 'sea_ice_annual_data'. (str)  
 `--wave_height_thresh` Used to define wave input files. Input files contain # of days with wave height > <wave_height_thresh> metres. (int 1-10)  
 `--sea_ice_concentration_thresh` Used to define sea ice input files. Input files contain # of days with sea ice concentration > <sea_ice_concentration_thresh> percent. (int 0-90 by 10s)  
-`--formula` The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data. (str)  
+`--icing_thresh` The threshold for the icing predictor index. Options are 'light', 'moderate', 'heavy', or 'extreme'. (str)  
+`--formula` The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data, P = Icing Predictor Index. (str)  
 `--x_resolution` Resolution of the output file in degrees longitude. (float)  
 `--y_resolution` Resolution of the output file in degrees latitude. (float)  
 `--lon_min` The minimum longitude bound of the output file in degrees. (float)  
@@ -67,6 +68,7 @@ end_year = start_year
 data_dir = os.path.join(os.getcwd(), "data")  
 wave_height_thresh = 4  
 sea_ice_concentration_thresh = 60  
+icing_thresh="light"  
 formula = "6*S/350 + 2.5*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))"  
 x_resolution = 0.2  
 y_resolution = 0.2  
@@ -85,7 +87,7 @@ docker run --rm -it -v $PWD/data:/app/data harshness_map python -m create_harshn
 --data_dir="./data" \
 --wave_height_thresh=2 \
 --sea_ice_concentration_thresh=0.2 \
---formula="4*S/350 + 4.5*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))" \
+--formula="4*S/350 + 4*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40)) + 0.5*P/200" \
 --x_resolution=0.4 \
 --y_resolution=0.4 \
 --lon_min=-60 \
@@ -106,30 +108,54 @@ Where,
 `S` is the average number of days per year with a sea ice concentration > 60%  
 `W` is the average number of days per year with a significant wave height > 4 metres  
 `I` is the average annual icebergdensity (# of icebergs per 100 km<sup>2</sup>)  
+Note: `P` can also be used in harshness index formulas to represent the average number of days per year with an Icing Predictor Index (described below) greater than a certain threshold, but is not included in the default Fleming-Drover Index
   
 When calling the `create_harshness_map` script, a custom harshness index formula may be passed as an argument.  
 A good place to start when trying out custom formulas is changing certain parameters of the default formula.  
 The default formula can be parameterized as follows:  
   
-`A*S/D + B*W/E + C*(I>T)*(F + G*log10((I/H)+J))`  
+`A*S/E + B*W/F + C*(I>T)*(G + H*log10((I/J)+L)) + D*P/K`  
 
 Where,  
-`A`, `B`, and `C` are weights for `S`, `W`, and `I` respectively, and should sum to 10.  
-`D`, `E`, `F`, `G`, and 'H' are normalization factors, and should not generally be changed without a knowledge of the data being used.  
-`J` is a small value added to the log10 argument simply to avoid taking log10 of zero.  
+`A`, `B`, `C`, and `D` are weights for `S`, `W`, `I`, and `P` respectively, and should sum to 10.  
+`E`, `F`, `G`, `H`, `J`, and `K` are normalization factors, and should not generally be changed without a knowledge of the data being used.  
+`L` is a small value added to the log10 argument simply to avoid taking log10 of zero.  
 `T` is a threshold for iceberg density. Densities < T will be considered 0.  
 
 These parameters can be modified to create custom formulas.  
 For example, to put more weight on wave height, and less on sea ice and icebergs, you may try:  
 `1*S/350 + 8*W/110 + 1*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))`  
-Or, you may not want to consider iceberg data at all:  
-`5*S/350 + 5*W/110`  
+Or, you may not want to consider iceberg data at all, and include the icing predictor index instead:  
+`5*S/350 + 3*W/110 + 2*P/200`  
 Of course, the formula is completely customizable, so feel free to experiment, here is an example of an acceptable (though probably non-sensical) formula:  
-`S*W + (S>W/10) * I/10 + I/100 + 15` 
+`S*W + (S>W/10) * I/10 + I/100 + P*W/15`  
+If you are interested in viewing only a singe variable, you can use single variable formulas as well:  
+`S`
+`W`
+`I`
+`P`
 
+## Icing Predictor Index
+The icing predictor index is a single parameter which takes sea surface temperature, wind speed, air temperature, and sea ice concentration data into account to provide a prediction of vessel icing rates in different ocean regions.  
 
+The icing predictor index, PR, is calculated using the following formula:
+
+`[Va * (Tf-Ta)] / [1 + 0.3*(Tw-Tf)]`
+
+Where,
+`Va` is the wind speed (ms-1)  
+`Tf` is seawater freezing temperature (°C)  
+`Ta` is the ambient air temperature (°C)  
+`Tw` is the Sea Surface Temperature (°C)  
+
+Icing Predictor values are categorized into the following levels:
+PR less than or equal to 0:  no icing  
+PR between 0 and 22:         light icing (icing rate < 0.7 cm/hour)
+PR between 22 and 53:        moderate icing (icing rate between 0.7-2.0 cm/hour)
+PR between 53 and 83:        heavy icing (icing rate between 2.0-4.0 cm/hour)
+PR greater than 83:          extreme icing (icing rate > 4.0 cm/hour)
 
 ## Data Acknowledgement
-Data utilized in this project are provided by GHRSST, Met Office and CMEMS
+Data utilized in this project are provided by GHRSST, Met Office, CMEMS, and CDS
 
 

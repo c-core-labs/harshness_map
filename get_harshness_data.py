@@ -871,16 +871,6 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             heavy_icing_raster.GetRasterBand(1).WriteArray(heavy_icing_days)
             extreme_icing_raster.GetRasterBand(1).WriteArray(extreme_icing_days)
             
-            #CDS datasets sometimes use x coordinates of 0 to 360 instead of -180 to 180. Warp the rasters to use 0 as center longitude
-            default_center_long = gdal.GetConfigOption('CENTER_LONG')
-            gdal.SetConfigOption('CENTER_LONG', '0')
-            gdal.Warp(no_icing_geotiff_name, no_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(light_icing_geotiff_name, light_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(moderate_icing_geotiff_name, moderate_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(heavy_icing_geotiff_name, heavy_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(extreme_icing_geotiff_name, extreme_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.SetConfigOption('CENTER_LONG', default_center_long)
-            
             #Clean up datasets
             del sea_surface_temp_dataset
             del wind_speed_U_dataset
@@ -892,6 +882,16 @@ def download_and_preprocess_data(data_year = datetime.today().year-1,
             del moderate_icing_raster
             del heavy_icing_raster
             del extreme_icing_raster
+            
+            #CDS datasets sometimes use x coordinates of 0 to 360 instead of -180 to 180. Warp the rasters to use 0 as center longitude
+            default_center_long = gdal.GetConfigOption('CENTER_LONG')
+            gdal.SetConfigOption('CENTER_LONG', '0')
+            gdal.Warp(no_icing_geotiff_name, no_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(light_icing_geotiff_name, light_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(moderate_icing_geotiff_name, moderate_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(heavy_icing_geotiff_name, heavy_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(extreme_icing_geotiff_name, extreme_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.SetConfigOption('CENTER_LONG', default_center_long)
             
             logger.info(f"Finished calculating daily icing predictor values for {data_year}")
 

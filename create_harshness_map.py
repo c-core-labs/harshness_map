@@ -125,7 +125,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
 
     #If the requested harshness map already exists, return it
     if os.path.exists(harshness_file_name):
-        logger.info(f"Harshness map with these parameters already ecists: {harshness_file_name}")
+        logger.info(f"Harshness map with these parameters already exists: {harshness_file_name}")
         return harshness_file_name
     
     #Ensure files exist for all years
@@ -211,10 +211,10 @@ def calculate_harshness(start_year=datetime.today().year-1,
     if not(os.path.exists(os.path.join(data_dir, 'harshness_maps'))):
            os.mkdir(os.path.join(data_dir, 'harshness_maps'))         
     gdal_calc.Calc(formula, 
-                S=warped_sea_ice_file, 
-                W=warped_waves_file,
-                I=warped_iceberg_file,
-                P=warped_icing_file,
+                S=warped_sea_ice_file if "S" in formula else None,
+                W=warped_waves_file if "W" in formula else None,
+                I=warped_iceberg_file if "I" in formula else None,
+                P=warped_icing_file if "P" in formula else None,
                 outfile=harshness_file_name)
     
     if clean:
