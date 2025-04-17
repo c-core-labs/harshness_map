@@ -1,6 +1,7 @@
 import copernicusmarine
 import os
 import logging
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -42,7 +43,7 @@ def cmems_products_to_dict(products):
                             product_dict[variable.short_name] = {
                                 "product": product.title,
                                 "long_name": variable.standard_name,
-                                "units": v.units,
+                                "units": variable.units,
                                 "datasets": {}
                             }
                         #Get time and depth coordinates specific to dataset
@@ -121,7 +122,7 @@ def query_cmems():
 
 def download_from_cmems(dataset,
                         variables,
-                        start_datetime=datetime.today()-1,
+                        start_datetime=datetime.today() - timedelta(days=1),
                         end_datetime=datetime.today(),
                         minimum_longitude=None,
                         maximum_longitude=None,

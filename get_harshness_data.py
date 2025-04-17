@@ -24,8 +24,9 @@ import tempfile
 import geopandas as gpd
 import pandas as pd
 import subprocess
+import json
 from cmems_utils import download_from_cmems, download_original_files_from_cmems, get_cmems_product_metadata, cmems_products_to_dict
-from cds_utilos import download_from_cds
+from cds_utils import download_from_cds
 from utils import count_bands_greater_than_thresh
 
 
@@ -620,6 +621,7 @@ def download_and_preprocess_iceberg_data(): #TODO: Finish this function
 def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                                  data_dir =  os.path.join(os.getcwd(), "data"),
                                  variables = ["siconc", "VHM0"],
+                                 metadata_file = os.path.join(os.getcwd(), "data", "CMEMs_metadata.json"),
                                  clean = True): #TODO: Finish this function
     """Downloads data defined in [variables] for a given year from Copernicus Marine Service.
     Calculates the number of days in the year that they exceed various thresholds.
@@ -639,12 +641,14 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         data_year (int): The year over which to download data and make calculations.
         data_dir (str): Path to a parent directory in which output data will be stored.
         variables (list(str)): a list of variables to be downloaded and preprocessed.
+        metadata_file (str): The path to a json file containing CMEMs metadata for the variables provided. Created by create_cmems_metadata_json.
         clean (bool): If true, intermediate files will be removed.
     Returns:
         data_dir (str)"""
     
-    OLDEST_WAVE_HEIGHT_DATA_YEAR = 1993
-    OLDEST_SEA_ICE_DATA_YEAR = 2007
+    NUM_THRESHOLDS = 9
+    DEFAULT_TIME_UNITS = "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)"
+    MILLISECONDS_IN_A_DAY = 86400000
 
     CMEMS_CREDENTIALS_FILE = os.path.join(data_dir, ".copernicusmarine-credentials")
     
@@ -652,132 +656,140 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
 
     if not(os.path.exists(data_dir)):
         os.mkdir(data_dir)
-    if not(os.path.exists(os.path.join(data_dir, "raw_data"))):
-        os.mkdir(os.path.join(data_dir, "raw_data"))
 
     for variable in variables:
-            ######LEFT OFF HERE################
-        if not(os.path.exists(os.path.join(data_dir, "waves_annual_data"))):
-            os.mkdir(os.path.join(data_dir, "waves_annual_data"))
-        if not(os.path.exists(os.path.join(data_dir, "sea_ice_annual_data"))):
-            os.mkdir(os.path.join(data_dir, "sea_ice_annual_data"))
-        if not(os.path.exists(os.path.join(data_dir, "iceberg_annual_data"))):
-            os.mkdir(os.path.join(data_dir, "iceberg_annual_data"))
-        if not os.path.exists(os.path.join(data_dir, "icing_predictor_annual_data")):
-            os.mkdir(os.path.join(data_dir, "icing_predictor_annual_data"))
+        variable_dir = os.path.join(data_dir, variable)
+        if not(os.path.exists(variable_dir)):
+            os.mkdir(variable_dir)
 
-        height_thresholds = range(1,11) #Height threshold in metres
-        existing_file_count = sum(f"{data_year}" in file_name for file_name in os.listdir(os.path.join(data_dir, "waves_annual_data")))
-        if existing_file_count == len(height_thresholds):
-            logger.info(f"Wave Height data already exists for {data_year}. Skipping Wave Height processing.")
+        existing_file_count = sum(f"{data_year}" in file_name for file_name in os.listdir(variable_dir))
+        if existing_file_count == NUM_THRESHOLDS:
+            logger.info(f"{variable} files already exist for {data_year}. Skipping.")
+            continue
+
+        with open(metadata_file, 'r') as file:
+            metadata = json.load(file)
+
+        if variable not in metadata:
+            error = f"No entry for {variable} found in metadata file, {metadata_file}. Skipping."
+            continue    
+
+        #Select dataset to use
+        logger.info(f"Selecting best dataset to use for {variable}")
+        for dataset_name in metadata[variable]["datasets"]:
+
+            try:
+                dataset = metadata[variable]["datasets"][dataset_name]
+                
+                time_units = dataset["time_units"]
+                if time_units != DEFAULT_TIME_UNITS:
+                    logger.debug(f"{dataset_name} uses unknown time units. Dataset will not be used.")
+                    continue
+                
+                time_step = dataset["time_step"]
+                if time_step != MILLISECONDS_IN_A_DAY:
+                    logger.debug(f"{dataset_name} uses a time step other than 1 day. Dataset will not be used.")
+                    continue
+
+                #Check that dataset contains the entire year #TODO: Deal with the case when data_year is split between two datasets
+                start_time = dataset["start_time"]
+                start_time = datetime.fromtimestamp(start_time / 1000)
+                if start_time > datetime(data_year, 1, 1):
+                    logger.debug(f"{dataset_name} does not contain all of {data_year}. Dataset will not be used.")
+                    continue
+                end_time = dataset["end_time"]
+                end_time = datetime.fromtimestamp(end_time / 1000)
+                if end_time < datetime(data_year + 1, 1, 1):
+                    logger.debug(f"{dataset_name} does not contain all of {data_year}. Dataset will not be used.")
+                    continue
+                
+                #All checks passed, dataset is suitable, break from loop:
+                break
+
+            except KeyError as e:
+                error = f"Error while reading from metadata file {metadata_file}: {e}"
+                logger.error(error)
+                raise(error)
+
+        #Download data
+        logger.info(f"Downloading {variable} Data")
+        raw_data_netcdf_name = f"{variable}_{data_year}_raw_data.nc"
+        raw_data_netcdf_name = os.path.join(variable_dir, raw_data_netcdf_name)
+        if os.path.exists(raw_data_netcdf_name):
+            logger.info(f"{raw_data_netcdf_name} already exists. Skipping download")
         else:
-            if (int(data_year) >= OLDEST_WAVE_HEIGHT_DATA_YEAR):
-                #Download current year dataset
-                logger.info(f"Downloading Wave Height Data")
-                waves_raw_data_netcdf_name = f"waves_raw_data_{data_year}.nc"
-                waves_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", waves_raw_data_netcdf_name)
-                if not(os.path.exists(waves_raw_data_netcdf_name)):
-                    start = time.time()
-                    download_from_cmems(output_file =       waves_raw_data_netcdf_name, 
-                                        data_year =         data_year, 
-                                        dataset =           "cmems_mod_glo_wav_my_0.2deg_PT3H-i", 
-                                        variables =         ["VHM0"],
-                                        credentials_file =  CMEMS_CREDENTIALS_FILE)
-                    end = time.time()
-                    logger.info(f"Waves download took {end-start} seconds")
+            start = time.time()
+            download_from_cmems(dataset =           dataset_name, 
+                                variables =         [variable],
+                                start_datetime =    datetime(data_year, 1, 1),
+                                end_datetime =      datetime(data_year + 1, 1, 1),
+                                output_file =       raw_data_netcdf_name, 
+                                credentials_file =  CMEMS_CREDENTIALS_FILE)
+            end = time.time()
+            logger.info(f"{variable} download took {end-start} seconds")
 
-                #Read raw data and generate daily averages
-                logger.info("Processing waves data")
-                waves_daily_averages_geotiff_name = f"waves_daily_averages_{data_year}.tif"
-                waves_daily_averages_geotiff_name = os.path.join(data_dir, "raw_data", waves_daily_averages_geotiff_name)
-                if not(os.path.exists(waves_daily_averages_geotiff_name)):
-                    start = time.time()
-                    get_waves_daily_averages(input_file =    waves_raw_data_netcdf_name,
-                                    output_file =   waves_daily_averages_geotiff_name)
-                    end = time.time()
-                    logger.info(f"Waves daily averages took {end-start} seconds")
+        #Compute thresholds
+        #Note: Was working on a method to calculate thresholds using mean snd standard dev, but won't work well for non normal distributed data, so will just use uniform thresholds between min and max for now
+        # with gdal.Open(raw_data_netcdf_name) as file:
+        #     scale_factor = file.GetMetadata()[f"{variable}#scale_factor"]
+        #     add_offset = file.GetMetadata()[f"{variable}#add_offset"]
+        #     num_bands = file.RasterCount
+        #     num_samples = file.RasterXSize * file.RasterYSize
+        #     means = []
+        #     variances = []
+        #     for band_num in range(1, num_bands+1):
+        #         band = file.GetRasterBand(band_num)
+        #         (minimum, maximum, mean, standard_deviation) = band.GetStatistics(True, True) #approx_ok=True, force=True
+        #         means.append(mean)
+        #         variances.append(standard_deviation**2)
+        # total_samples = num_samples * num_bands
+        # overall_mean = np.mean(means)
+        # s1 = np.sum([v * num_samples for v in variances])
+        # s2 = np.sum([num_samples * (m - overall_mean)**2 for m in means])
+        # overall_variance = (s1 + s2) / total_samples
+        # overall_standard_deviation = np.sqrt(overall_variance)
 
-                #Count days where average is > thresholds (1m - 10m)
-                for wave_height_thresh in height_thresholds:
-                    waves_final_count_geotiff_name = f"waves_annual_data_{data_year}_{wave_height_thresh}.tif"
-                    waves_final_count_geotiff_name = os.path.join(data_dir, "waves_annual_data", waves_final_count_geotiff_name)
-                    if not(os.path.exists(waves_final_count_geotiff_name)):
-                        logger.info(f"Counting number of days with wave height > {wave_height_thresh}m")
-                        start = time.time()
-                        count_bands_greater_than_thresh(input_file =    waves_daily_averages_geotiff_name,
-                                                        output_file =   waves_final_count_geotiff_name,
-                                                        thresh =        wave_height_thresh * 100) #Height threshold in centimetres
-                        end = time.time()
-                        logger.info(f"Wave height count took {end-start} seconds")
-
-
-
-                logger.info("Finished processing wave data")
-            else:
-                logger.info(f"Wave Height data is only available from the year {OLDEST_WAVE_HEIGHT_DATA_YEAR} onward. Not available for {data_year}. Skipping Wave Height data download")
-
-        #########################
-        ##Sea ice concentration##
-
-        concentration_thresholds = range(0,100,10) #Concentration threshold in percentage
-        existing_file_count = sum(f"{data_year}" in file_name for file_name in os.listdir(os.path.join(data_dir, "sea_ice_annual_data")))
-        if existing_file_count == len(concentration_thresholds):
-            logger.info(f"Sea Ice Concentration data already exists for {data_year}. Skipping Sea Ice Concentration processing.")
-        else:
-            if (int(data_year) >= OLDEST_SEA_ICE_DATA_YEAR):
-                #Download current year dataset
-                logger.info(f"Downloading Sea Ice Concentration Data")
-                sea_ice_raw_data_netcdf_name = f"sea_ice_raw_data_{data_year}.nc"
-                sea_ice_raw_data_netcdf_name = os.path.join(data_dir, "raw_data", sea_ice_raw_data_netcdf_name)
-                if not(os.path.exists(sea_ice_raw_data_netcdf_name)):
-                    start = time.time()
-                    download_from_cmems(output_file =   sea_ice_raw_data_netcdf_name,
-                                        data_year =     data_year, 
-                                        dataset =       "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2", 
-                                        variables =     ["sea_ice_fraction"],
-                                        credentials_file =  CMEMS_CREDENTIALS_FILE)
-                    end = time.time()
-                    logger.info(f"Sea ice download took {end-start} seconds")
-
-                #Count days where average is > threshold (concentration 0% - 90%)
-                logger.info("Processing sea ice data")
-                for sea_ice_concentration_threshold in concentration_thresholds:
-                    sea_ice_final_count_geotiff_name = f"sea_ice_annual_data_{data_year}_{sea_ice_concentration_threshold}.tif"
-                    sea_ice_final_count_geotiff_name = os.path.join(data_dir, "sea_ice_annual_data", sea_ice_final_count_geotiff_name)
-                    if not(os.path.exists(sea_ice_final_count_geotiff_name)):
-                        logger.info(f"Counting number of days with sea ice concentration > {sea_ice_concentration_threshold}%")
-                        start = time.time()
-                        count_bands_greater_than_thresh(input_file =    sea_ice_raw_data_netcdf_name,
-                                                        output_file =   sea_ice_final_count_geotiff_name,
-                                                        thresh =        sea_ice_concentration_threshold)
-                        end = time.time()
-                        logger.info(f"Sea ice count took {end-start} seconds")
-
-
-                logger.info("Finished processing sea ice data")
-            else:
-                logger.info(f"Sea Ice data is only available from the year {OLDEST_SEA_ICE_DATA_YEAR} onward. Not available for {data_year}. Skipping Sea Ice data download")
-    
-    #Cleanup files
-    if clean:
-        try:
-            os.remove(waves_daily_averages_geotiff_name)
-        except UnboundLocalError:
-            logger.debug("waves_daily_averages_geotiff_name not set. Skipping deletion.")
-        try:
-            os.remove(waves_raw_data_netcdf_name)
-        except UnboundLocalError:
-            logger.debug("waves_raw_data_netcdf_name not set. Skipping deletion.")
-        try:
-            os.remove(sea_ice_raw_data_netcdf_name)
-        except UnboundLocalError:
-            logger.debug("sea_ice_raw_data_netcdf_name not set. Skipping deletion.")
-        try:
-            shutil.rmtree(iceberg_dir_name)
-        except UnboundLocalError:
-            logger.debug("iceberg_dir_name not set. Skipping deletion.")
-        shutil.rmtree(os.path.join(data_dir, "raw_data"))
+        logger.info(f"Processing {variable} data")
+        #Compute uniform thresholds
+        with gdal.Open(raw_data_netcdf_name) as file:
+            minimum = float(file.GetMetadata()[f"{variable}#valid_min"])
+            maximum = float(file.GetMetadata()[f"{variable}#valid_max"])
+        step = (maximum - minimum) / (NUM_THRESHOLDS + 1)
+        thresholds = [minimum + step * t for t in range(1,NUM_THRESHOLDS+1)]
         
+        #Count days where value is > thresholds
+        for threshold in thresholds:
+            try:
+                # Adjust threshold using scale and offset from metadata.
+                # Note, unadjusted values and thresholds are used for calculation since we are only counting bands > threshold, it makes no difference.
+                # Adjusted threshold is just used for naming output files since it properly reflects the real world units.
+                scale_factor = float(file.GetMetadata()[f"{variable}#scale_factor"])
+                add_offset = float(file.GetMetadata()[f"{variable}#add_offset"])
+                scaled_threshold = threshold * scale_factor + add_offset
+            except KeyError as e:
+                scaled_threshold = threshold
+                logger.warning(f"Scale information not found for {variable}. Values will not be scaled (This will not affect results, but threshold values in file names will reflect unscaled values.)")
+
+            final_count_geotiff_name = f"{variable}_{data_year}_{scaled_threshold}.tif"
+            final_count_geotiff_name = os.path.join(variable_dir, final_count_geotiff_name)
+            if os.path.exists(final_count_geotiff_name):
+                logger.info(f"{final_count_geotiff_name} already exists. Skipping Processing.")
+            else:
+                logger.info(f"Counting number of days with {variable} > {scaled_threshold}")
+                start = time.time()
+                count_bands_greater_than_thresh(input_file =    raw_data_netcdf_name,
+                                                output_file =   final_count_geotiff_name,
+                                                thresh =        threshold)
+                end = time.time()
+                logger.info(f"Count took {end-start} seconds")
+
+        if clean:
+            try:
+                os.remove(raw_data_netcdf_name)
+            except UnboundLocalError:
+                logger.debug(f"raw_data_netcdf_name not set. Skipping deletion.")
+
+        logger.info(f"Finished processing {variable} data")
     
     return(data_dir)
         

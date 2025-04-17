@@ -316,7 +316,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
                 variable_files.append(input_file)
             except AssertionError as e:
                 variables_missing_files.append(variable)
-                break
+                continue
         input_files.append(variable_files)
     if variables_missing_files:
         error = f"The following variables are missing input files: {variables_missing_files}. Harshness map generation cancelled."
