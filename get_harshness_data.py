@@ -280,7 +280,7 @@ def create_cmems_metadata_json(product_ids,
     Returns:
         json_filename (str)"""
     products = []
-    for product_id in prpduct_ids:
+    for product_id in product_ids:
         product = get_cmems_product_metadata(product_id)
         products.append(product)
     metadata_dict = cmems_products_to_dict(products)
@@ -649,6 +649,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
     NUM_THRESHOLDS = 9
     DEFAULT_TIME_UNITS = "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)"
     MILLISECONDS_IN_A_DAY = 86400000
+    NUM_BANDS_TO_ESTIMATE_MIN_MAX = 4 #If min/max values cannot be read from metadata, use a sample from this many bands to estimate min/max of the dataset
 
     CMEMS_CREDENTIALS_FILE = os.path.join(data_dir, ".copernicusmarine-credentials")
     
@@ -752,36 +753,49 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         logger.info(f"Processing {variable} data")
         #Compute uniform thresholds
         with gdal.Open(raw_data_netcdf_name) as file:
-            minimum = float(file.GetMetadata()[f"{variable}#valid_min"])
-            maximum = float(file.GetMetadata()[f"{variable}#valid_max"])
+            try:
+                minimum = float(file.GetMetadata()[f"{variable}#valid_min"])
+                maximum = float(file.GetMetadata()[f"{variable}#valid_max"])
+            except KeyError as e:
+                num_bands = min(NUM_BANDS_TO_ESTIMATE_MIN_MAX, file.RasterCount)
+                minimum = float('inf')
+                maximum = float('-inf')
+                logger.warning(f"Could not obtain min/max value from {raw_data_netcdf_name} metadata. Using sample of {num_bands} raster bands to estimate min/max.")
+                for i in range(1,num_bands+1):
+                    band_num = i * int(file.RasterCount / num_bands) #Pick evenly distributed bands
+                    band = file.GetRasterBand(band_num)
+                    (band_minimum, band_maximum, band_mean, band_standard_deviation) = band.GetStatistics(True, True) #approx_ok=True, force=True
+                    minimum = min(band_minimum, minimum)
+                    maximum = max(band_maximum, maximum)
+            try:
+                scale_factor = float(file.GetMetadata()[f"{variable}#scale_factor"])
+                add_offset = float(file.GetMetadata()[f"{variable}#add_offset"])            
+            except KeyError as e:
+                scale_factor = 1
+                add_offset = 0
+                logger.warning(f"Scale information not found for {variable}. This will not affect results, but threshold values in file names may not represent expected units.")
         step = (maximum - minimum) / (NUM_THRESHOLDS + 1)
         thresholds = [minimum + step * t for t in range(1,NUM_THRESHOLDS+1)]
         
         #Count days where value is > thresholds
         for threshold in thresholds:
-            try:
-                # Adjust threshold using scale and offset from metadata.
-                # Note, unadjusted values and thresholds are used for calculation since we are only counting bands > threshold, it makes no difference.
-                # Adjusted threshold is just used for naming output files since it properly reflects the real world units.
-                scale_factor = float(file.GetMetadata()[f"{variable}#scale_factor"])
-                add_offset = float(file.GetMetadata()[f"{variable}#add_offset"])
-                scaled_threshold = threshold * scale_factor + add_offset
-            except KeyError as e:
-                scaled_threshold = threshold
-                logger.warning(f"Scale information not found for {variable}. Values will not be scaled (This will not affect results, but threshold values in file names will reflect unscaled values.)")
+            # Adjust threshold using scale and offset from metadata.
+            # Note, unadjusted values and thresholds are used for calculation since we are only counting bands > threshold, it makes no difference.
+            # Adjusted threshold is just used for naming output files since it properly reflects the real world units.
+            scaled_threshold = threshold * scale_factor + add_offset
 
-            final_count_geotiff_name = f"{variable}_{data_year}_{scaled_threshold}.tif"
+            final_count_geotiff_name = f"{variable}_{data_year}_{scaled_threshold:.2g}.tif"
             final_count_geotiff_name = os.path.join(variable_dir, final_count_geotiff_name)
             if os.path.exists(final_count_geotiff_name):
                 logger.info(f"{final_count_geotiff_name} already exists. Skipping Processing.")
             else:
-                logger.info(f"Counting number of days with {variable} > {scaled_threshold}")
+                logger.info(f"Counting number of days with {variable} > {scaled_threshold:.2g}")
                 start = time.time()
                 count_bands_greater_than_thresh(input_file =    raw_data_netcdf_name,
                                                 output_file =   final_count_geotiff_name,
                                                 thresh =        threshold)
                 end = time.time()
-                logger.info(f"Count took {end-start} seconds")
+                logger.info(f"Count took {end-start:.1f} seconds")
 
         if clean:
             try:
