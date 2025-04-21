@@ -31,7 +31,7 @@ from utils import count_bands_greater_than_thresh
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 ##########################
 ###Function Definitions###
@@ -537,10 +537,6 @@ def download_and_preprocess_icing_predictor_data(): #TODO: Finish this function
             logger.info(f"Finished calculating daily icing predictor values for {data_year}")
 
 
-
-
-
-
 def download_and_preprocess_iceberg_data(): #TODO: Finish this function
     """Downloads iceberg for a given year from Copernicus Marine Service.
     Averages the iceberg density over the year.
@@ -622,21 +618,15 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                                  data_dir =  os.path.join(os.getcwd(), "data"),
                                  variables = ["siconc", "VHM0"],
                                  metadata_file = os.path.join(os.getcwd(), "data", "CMEMs_metadata.json"),
-                                 clean = True): #TODO: Finish this function
+                                 clean = True):
     """Downloads data defined in [variables] for a given year from Copernicus Marine Service.
     Calculates the number of days in the year that they exceed various thresholds.
-    Averages the iceberg density over the year.
     Output data is stored in <data_dir>/<variable_name>/
     
     Default data downloaded from CMEMs are:
         cmems_mod_glo_wav_my_0.2deg_PT3H-i (VHM0) for significant wave height data 
         GLOBAL_MULTIYEAR_PHY_001_030 (siconc) for sea ice concentration data
-            Note: used to use (make sure they are similar): METOFFICE-GLO-SST-L4-REP-OBS-SST (sea_ice_fraction) for sea ice concentration data,
-        DMI-ARC-SEAICE_BERG-L4-NRT-OBS (ibc) for iceberg concentration data
-        
-    Output data calculated are:
-        Number of days with significant wave heights > 1, 2, 3, 4, 5, 6, 7, 8, 9, and 10 metres
-        Number of days with sea ice concentration > 0, 10, 20, 30, 40, 50, 60, 70, 80, and 90 percent
+            Note: used to use (TODO: make sure they are similar): METOFFICE-GLO-SST-L4-REP-OBS-SST (sea_ice_fraction) for sea ice concentration data,
     Parameters:
         data_year (int): The year over which to download data and make calculations.
         data_dir (str): Path to a parent directory in which output data will be stored.
@@ -663,10 +653,11 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         if not(os.path.exists(variable_dir)):
             os.mkdir(variable_dir)
 
-        existing_file_count = sum(f"{data_year}" in file_name for file_name in os.listdir(variable_dir))
-        if existing_file_count == NUM_THRESHOLDS:
-            logger.info(f"{variable} files already exist for {data_year}. Skipping.")
-            continue
+        #Maybe not necessary. By commenting this block out, we can allow for multiple different thresholds to be calculated per year
+        # existing_file_count = sum(f"{data_year}" in file_name for file_name in os.listdir(variable_dir))
+        # if existing_file_count >= NUM_THRESHOLDS:
+        #     logger.info(f"{variable} files already exist for {data_year}. Skipping.")
+        #     continue
 
         with open(metadata_file, 'r') as file:
             metadata = json.load(file)
@@ -676,6 +667,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             continue    
 
         #Select dataset to use
+        dataset_to_download = None
         logger.info(f"Selecting best dataset to use for {variable}")
         for dataset_name in metadata[variable]["datasets"]:
 
@@ -705,12 +697,18 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                     continue
                 
                 #All checks passed, dataset is suitable, break from loop:
+                dataset_to_download = dataset_name
+                logger.debug(f"{dataset_name} is suitable and will be used for download.")
                 break
 
             except KeyError as e:
                 error = f"Error while reading from metadata file {metadata_file}: {e}"
                 logger.error(error)
                 raise(error)
+
+        if dataset_to_download is None:
+            logger.error(f"No suitable dataset found for {variable}. Skipping")
+            continue
 
         #Download data
         logger.info(f"Downloading {variable} Data")
@@ -720,7 +718,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             logger.info(f"{raw_data_netcdf_name} already exists. Skipping download")
         else:
             start = time.time()
-            download_from_cmems(dataset =           dataset_name, 
+            download_from_cmems(dataset =           dataset_to_download, 
                                 variables =         [variable],
                                 start_datetime =    datetime(data_year, 1, 1),
                                 end_datetime =      datetime(data_year + 1, 1, 1),
