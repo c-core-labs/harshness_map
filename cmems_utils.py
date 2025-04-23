@@ -241,7 +241,7 @@ def download_original_files_from_cmems(output_dir=None,
                              filter = f"*_{data_year}*",
                              output_directory = output_dir, 
                              no_directories = True,
-                             force_download = True,
+                             force_download = True, #TODO: Replace/remove, this is deprecated
                              credentials_file=credentials_file)
         logger.info(f"Download complete: {output_dir}")
     else: #File already downloaded

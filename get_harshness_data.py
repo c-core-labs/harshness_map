@@ -53,17 +53,24 @@ def get_waves_daily_averages(input_file=None,
         daily_data = []
         daily_band_num = 1
         num_bands = gdal_dataset.RasterCount
-        num_daily_bands = int(num_bands / 8) #8 bands per day
+        num_daily_bands = int(np.ceil(num_bands / 8)) #8 bands per day #TODO: Handle Jan 1 of following year better (probably just drop)
 
         raster_x_size = gdal_dataset.RasterXSize
         raster_y_size = gdal_dataset.RasterYSize
         raster_data_type = gdal_dataset.GetRasterBand(1).DataType
         raster_geo_transform = gdal_dataset.GetGeoTransform()
         raster_projection = gdal_dataset.GetProjection()
+        scale_factor = gdal_dataset.GetMetadata()["VHM0#scale_factor"]
+        add_offset = gdal_dataset.GetMetadata()["VHM0#add_offset"]
+        metadata_dict = {
+                        "VHM0#scale_factor": scale_factor,
+                        "VHM0#add_offset": add_offset
+                        }
 
         daily_averages_raster = gdal.GetDriverByName("GTiff").Create(output_file, raster_x_size, raster_y_size, num_daily_bands, raster_data_type)
         daily_averages_raster.SetGeoTransform(raster_geo_transform)
         daily_averages_raster.SetProjection(raster_projection)
+        daily_averages_raster.SetMetadata(metadata_dict)
         for band_num in range(1, num_bands+1):
             band = gdal_dataset.GetRasterBand(band_num)
             band_timestamp = int(band.GetMetadataItem("NETCDF_DIM_time"))
@@ -170,8 +177,8 @@ def process_excel_iceberg_data(input_dir=None,
 
     # Filter the data for a specific year only
     df_selected_year = mean_ice_concentration_df[mean_ice_concentration_df["Year"] == data_year]
-    # icebergs/1km^2 -> icebergs/100km^2
-    df_selected_year["Avg_AD_All"] = df_selected_year["Avg_AD_All"] * 100 #TODO: Should this be * 10000?
+    # icebergs/1km^2 -> icebergs/100km^2 #TODO: Confirm this is the right conversion. If so, it should be * 10000, not 100
+    df_selected_year["Avg_AD_All"] = df_selected_year["Avg_AD_All"] * 100 
     logger.info("Reading oilco shapefile...")
 
     shapefile_path = os.path.join(input_dir, "oilco_shapefile_dir/Metocean_Nalcor_Mar31.shp")
@@ -288,7 +295,9 @@ def create_cmems_metadata_json(product_ids,
         json.dump(metadata_dict, file)
 
 
-def download_and_preprocess_icing_predictor_data(): #TODO: Finish this function
+def download_and_preprocess_icing_predictor_data(data_year = datetime.today().year-1,
+                                                 data_dir =  os.path.join(os.getcwd(), "data"),
+                                                 clean = True): #TODO: Finish this function
     """Downloads sea surface temperature, wind speed, air temperature, sea ice cover, and sea water salinity data for a given year 
     from Copernicus Climate Data Store and Copernicus Marine Service and uses this data to calculate an annual Icing Predictor Index stored in <data_dir>/icing/.
         Data Downloaded from CDS are:
@@ -316,11 +325,11 @@ def download_and_preprocess_icing_predictor_data(): #TODO: Finish this function
     # At some point we can look into this further, but for now, maybe easiest to just use a constant value of -1.8 for Tf and not worry about salinity
     
     #Name output files
-    no_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_no_icing.tif")
-    light_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_light_icing.tif")
-    moderate_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_moderate_icing.tif")
-    heavy_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_heavy_icing.tif")
-    extreme_icing_geotiff_name = os.path.join(data_dir, "icing_predictor_annual_data", f"icing_predictor_annual_data_{data_year}_extreme_icing.tif")
+    no_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_no_icing.tif")
+    light_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_light_icing.tif")
+    moderate_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_moderate_icing.tif")
+    heavy_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_heavy_icing.tif")
+    extreme_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_extreme_icing.tif")
     
     if os.path.exists(no_icing_geotiff_name) \
     and os.path.exists(light_icing_geotiff_name) \
@@ -331,12 +340,13 @@ def download_and_preprocess_icing_predictor_data(): #TODO: Finish this function
     
     else:
         #Download datasets#
-
-        sea_surface_temp_netcdf_name = os.path.join(data_dir, "raw_data", f"sea_surface_temperature_{data_year}.nc")
-        wind_speed_u_netcdf_name = os.path.join(data_dir, "raw_data", f"wind_speed_u_{data_year}.nc")
-        wind_speed_v_netcdf_name = os.path.join(data_dir, "raw_data", f"wind_speed_v_{data_year}.nc")
-        air_temp_netcdf_name = os.path.join(data_dir, "raw_data", f"air_temperature_{data_year}.nc")
-        sea_ice_cover_netcdf_name = os.path.join(data_dir, "raw_data", f"sea_ice_cover_{data_year}.nc")
+        if not os.path.exists(os.path.join(data_dir, "icing")):
+            os.mkdir(os.path.join(data_dir, "icing"))
+        sea_surface_temp_netcdf_name = os.path.join(data_dir, "icing", f"sea_surface_temperature_{data_year}.nc")
+        wind_speed_u_netcdf_name = os.path.join(data_dir, "icing", f"wind_speed_u_{data_year}.nc")
+        wind_speed_v_netcdf_name = os.path.join(data_dir, "icing", f"wind_speed_v_{data_year}.nc")
+        air_temp_netcdf_name = os.path.join(data_dir, "icing", f"air_temperature_{data_year}.nc")
+        sea_ice_cover_netcdf_name = os.path.join(data_dir, "icing", f"sea_ice_cover_{data_year}.nc")
 
         #Sea Surface Temperature Data
         if os.path.exists(sea_surface_temp_netcdf_name):
@@ -401,10 +411,7 @@ def download_and_preprocess_icing_predictor_data(): #TODO: Finish this function
             end = time.time()
             logger.info(f"Sea ice cover download took {end-start} seconds")
         
-
         #Open Datasets#
-        
-        
         try:
             sea_surface_temp_netcdf_dataset_name = f"NETCDF:{sea_surface_temp_netcdf_name}:sst"
             wind_speed_U_netcdf_dataset_name = f"NETCDF:{wind_speed_u_netcdf_name}:u10"
@@ -533,28 +540,38 @@ def download_and_preprocess_icing_predictor_data(): #TODO: Finish this function
             del moderate_icing_raster
             del heavy_icing_raster
             del extreme_icing_raster
+
+            if clean:
+                os.remove(sea_surface_temp_netcdf_name)
+                os.remove(wind_speed_u_netcdf_name)
+                os.remove(wind_speed_v_netcdf_name)
+                os.remove(air_temp_netcdf_name)
+                os.remove(sea_ice_cover_netcdf_name)
             
             logger.info(f"Finished calculating daily icing predictor values for {data_year}")
 
 
-def download_and_preprocess_iceberg_data(): #TODO: Finish this function
+def download_and_preprocess_iceberg_data(data_year = datetime.today().year-1,
+                                         data_dir =  os.path.join(os.getcwd(), "data"),
+                                         clean = True): #TODO: Finish this function
     """Downloads iceberg for a given year from Copernicus Marine Service.
     Averages the iceberg density over the year.
     """
     OLDEST_ICEBERG_DATA_YEAR = 2020
     OLDEST_OILCO_ICEBERG_DATA_YEAR = 1998
     NEWEST_OILCO_ICEBERG_DATA_YEAR = 2021
+    CMEMS_CREDENTIALS_FILE = os.path.join(data_dir, ".copernicusmarine-credentials")
 
-    iceberg_mean_density_name = f"iceberg_annual_data_{data_year}.tif"
-    iceberg_mean_density_name = os.path.join(data_dir, "iceberg_annual_data", iceberg_mean_density_name)
+    iceberg_mean_density_name = f"ibc_{data_year}.tif"
+    iceberg_mean_density_name = os.path.join(data_dir, "ibc", iceberg_mean_density_name)
     if os.path.exists(iceberg_mean_density_name):
         logger.info(f"Iceberg data already exists for {data_year}. Skipping Iceberg processing.")
     else:
         if (int(data_year) >= OLDEST_ICEBERG_DATA_YEAR):
             #Download Current Year Data
             logger.info(f"Downloading Iceberg Data")
-            iceberg_dir_name = f"iceberg_raw_data_{data_year}"
-            iceberg_dir_name = os.path.join(data_dir, "raw_data", iceberg_dir_name)
+            iceberg_dir_name = f"ibc_{data_year}"
+            iceberg_dir_name = os.path.join(data_dir, "ibc", iceberg_dir_name)
             if not(os.path.exists(iceberg_dir_name)):
                 start = time.time()
                 download_original_files_from_cmems(output_dir = iceberg_dir_name,
@@ -585,8 +602,8 @@ def download_and_preprocess_iceberg_data(): #TODO: Finish this function
     if (int(data_year) >= OLDEST_OILCO_ICEBERG_DATA_YEAR and int(data_year) <= NEWEST_OILCO_ICEBERG_DATA_YEAR):
         logger.info("Reading oilco ice density excel data...")
         
-        oilco_data_dir = "oilco_iceberg_data"
-        oilco_iceberg_mean_density_name = f"oilco_iceberg_annual_data_{data_year}.tif"
+        oilco_data_dir = os.path.join(data_dir, "oilco")
+        oilco_iceberg_mean_density_name = f"oilco_{data_year}.tif"
         oilco_iceberg_mean_density_name = os.path.join(oilco_data_dir, oilco_iceberg_mean_density_name)
         
         if not(os.path.exists(oilco_iceberg_mean_density_name)):
@@ -596,21 +613,21 @@ def download_and_preprocess_iceberg_data(): #TODO: Finish this function
                                     reference_tif=iceberg_mean_density_name)
         else:
             logger.info(f"{oilco_iceberg_mean_density_name} already exists.")
+
+        # Only overlap over 2020-2021
+        if os.path.exists(iceberg_mean_density_name) and os.path.exists(oilco_iceberg_mean_density_name):
+            logger.info(f"Merging Oilco & CMEMS iceberg rasters found for {data_year}...")
+            mosaic_with_cmems(oilco_iceberg_mean_density_name, iceberg_mean_density_name, iceberg_mean_density_name, nodata=-1)
+            logger.info("Mosaic created!")
+        else:
+            logger.info("No overlapping Oilco & CMEMS data to merge or only one dataset is available.")
+            
     else:
         logger.info(f"No Oilco data for year {data_year} (valid range is 1998-2021)")
         
            
-    cmems_tif = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_annual_data_{data_year}.tif")
-    oilco_tif = os.path.join("oilco_iceberg_data", f"oilco_iceberg_annual_data_{data_year}.tif")     
     
-    # Only overlap over 2020-2021
-    if os.path.exists(cmems_tif) and os.path.exists(oilco_tif):
-        logger.info(f"Merging Oilco & CMEMS iceberg rasters found for {data_year}...")
-        cmems_tif = os.path.join(data_dir, "iceberg_annual_data", f"iceberg_annual_data_{data_year}.tif")
-        mosaic_with_cmems(oilco_tif, cmems_tif, cmems_tif, nodata=-1)
-        logger.info("Mosaic created!")
-    else:
-        logger.info("No overlapping Oilco & CMEMS data to merge or only one dataset is available.")
+
 
 
 
@@ -639,6 +656,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
     NUM_THRESHOLDS = 9
     DEFAULT_TIME_UNITS = "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)"
     MILLISECONDS_IN_A_DAY = 86400000
+    MILLISECONDS_IN_THREE_HOURS = 10800000
     NUM_BANDS_TO_ESTIMATE_MIN_MAX = 4 #If min/max values cannot be read from metadata, use a sample from this many bands to estimate min/max of the dataset
 
     CMEMS_CREDENTIALS_FILE = os.path.join(data_dir, ".copernicusmarine-credentials")
@@ -662,11 +680,16 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         with open(metadata_file, 'r') as file:
             metadata = json.load(file)
 
+        if variable == "VHM0": #TODO: Get standard 3-hourly processing working and remove workarund for VHM0
+            desired_time_step = MILLISECONDS_IN_THREE_HOURS
+        else:
+            desired_time_step = MILLISECONDS_IN_A_DAY
+
         if variable not in metadata:
             error = f"No entry for {variable} found in metadata file, {metadata_file}. Skipping."
-            continue    
+            continue
 
-        #Select dataset to use
+        #Select dataset to use #TODO: move to function
         dataset_to_download = None
         logger.info(f"Selecting best dataset to use for {variable}")
         for dataset_name in metadata[variable]["datasets"]:
@@ -680,7 +703,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                     continue
                 
                 time_step = dataset["time_step"]
-                if time_step != MILLISECONDS_IN_A_DAY:
+                if time_step != desired_time_step:
                     logger.debug(f"{dataset_name} uses a time step other than 1 day. Dataset will not be used.")
                     continue
 
@@ -710,7 +733,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             logger.error(f"No suitable dataset found for {variable}. Skipping")
             continue
 
-        #Download data
+        #Download data #TODO: move to function
         logger.info(f"Downloading {variable} Data")
         raw_data_netcdf_name = f"{variable}_{data_year}_raw_data.nc"
         raw_data_netcdf_name = os.path.join(variable_dir, raw_data_netcdf_name)
@@ -749,8 +772,19 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         # overall_standard_deviation = np.sqrt(overall_variance)
 
         logger.info(f"Processing {variable} data")
-        #Compute uniform thresholds
-        with gdal.Open(raw_data_netcdf_name) as file:
+        daily_raw_data_file_name = raw_data_netcdf_name
+        
+        if variable == "VHM0": #TODO: Remove workaround
+            raw_data_tif_name = raw_data_netcdf_name.replace(".nc", ".tif")
+            daily_raw_data_file_name = raw_data_tif_name
+            if os.path.exists(raw_data_tif_name):
+                logger.info(f{"VHM0 daily average file, {raw_data_tif_name}, already exists. Daily averages will not be recalculated"})
+            else:
+                logger.info(f"Calculating daily average data from 3-hourly VHM0 data")
+                get_waves_daily_averages(input_file=raw_data_netcdf_name, output_file=raw_data_tif_name)
+
+        #Compute uniform thresholds #TODO: move to function
+        with gdal.Open(daily_raw_data_file_name) as file:
             try:
                 minimum = float(file.GetMetadata()[f"{variable}#valid_min"])
                 maximum = float(file.GetMetadata()[f"{variable}#valid_max"])
@@ -758,7 +792,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                 num_bands = min(NUM_BANDS_TO_ESTIMATE_MIN_MAX, file.RasterCount)
                 minimum = float('inf')
                 maximum = float('-inf')
-                logger.warning(f"Could not obtain min/max value from {raw_data_netcdf_name} metadata. Using sample of {num_bands} raster bands to estimate min/max.")
+                logger.warning(f"Could not obtain min/max value from {daily_raw_data_file_name} metadata. Using sample of {num_bands} raster bands to estimate min/max.")
                 for i in range(1,num_bands+1):
                     band_num = i * int(file.RasterCount / num_bands) #Pick evenly distributed bands
                     band = file.GetRasterBand(band_num)
@@ -789,7 +823,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             else:
                 logger.info(f"Counting number of days with {variable} > {scaled_threshold:.2g}")
                 start = time.time()
-                count_bands_greater_than_thresh(input_file =    raw_data_netcdf_name,
+                count_bands_greater_than_thresh(input_file =    daily_raw_data_file_name,
                                                 output_file =   final_count_geotiff_name,
                                                 thresh =        threshold)
                 end = time.time()
@@ -800,6 +834,10 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                 os.remove(raw_data_netcdf_name)
             except UnboundLocalError:
                 logger.debug(f"raw_data_netcdf_name not set. Skipping deletion.")
+            try:
+                os.remove(daily_raw_data_file_name)
+            except UnboundLocalError:
+                logger.debug(f"daily_raw_data_file_name not set. Skipping deletion.")
 
         logger.info(f"Finished processing {variable} data")
     
