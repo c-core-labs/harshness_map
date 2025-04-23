@@ -493,7 +493,7 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
             logger.info(f"Icing predictor calculation took {end-start} seconds")
 
             
-            #Create output files
+            #Create output files #TODO: Change these to ints, not float32s
             logger.info(f"Writing icing predictor maps to {os.path.join(data_dir, 'icing_predictor_annual_data')}")
             no_icing_raster = gdal.GetDriverByName("GTiff").Create(no_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
             light_icing_raster = gdal.GetDriverByName("GTiff").Create(light_icing_geotiff_name, raster_x_size, raster_y_size, bands=1, eType=gdal.GDT_Float32)
@@ -519,16 +519,6 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
             heavy_icing_raster.GetRasterBand(1).WriteArray(heavy_icing_days)
             extreme_icing_raster.GetRasterBand(1).WriteArray(extreme_icing_days)
             
-            #CDS datasets sometimes use x coordinates of 0 to 360 instead of -180 to 180. Warp the rasters to use 0 as center longitude
-            default_center_long = gdal.GetConfigOption('CENTER_LONG')
-            gdal.SetConfigOption('CENTER_LONG', '0')
-            gdal.Warp(no_icing_geotiff_name, no_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(light_icing_geotiff_name, light_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(moderate_icing_geotiff_name, moderate_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(heavy_icing_geotiff_name, heavy_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.Warp(extreme_icing_geotiff_name, extreme_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
-            gdal.SetConfigOption('CENTER_LONG', default_center_long)
-            
             #Clean up datasets
             del sea_surface_temp_dataset
             del wind_speed_U_dataset
@@ -541,6 +531,16 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
             del heavy_icing_raster
             del extreme_icing_raster
 
+            #CDS datasets sometimes use x coordinates of 0 to 360 instead of -180 to 180. Warp the rasters to use 0 as center longitude
+            default_center_long = gdal.GetConfigOption('CENTER_LONG')
+            gdal.SetConfigOption('CENTER_LONG', '0')
+            gdal.Warp(no_icing_geotiff_name, no_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(light_icing_geotiff_name, light_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(moderate_icing_geotiff_name, moderate_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(heavy_icing_geotiff_name, heavy_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(extreme_icing_geotiff_name, extreme_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.SetConfigOption('CENTER_LONG', default_center_long)
+        
             if clean:
                 os.remove(sea_surface_temp_netcdf_name)
                 os.remove(wind_speed_u_netcdf_name)
@@ -778,7 +778,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             raw_data_tif_name = raw_data_netcdf_name.replace(".nc", ".tif")
             daily_raw_data_file_name = raw_data_tif_name
             if os.path.exists(raw_data_tif_name):
-                logger.info(f{"VHM0 daily average file, {raw_data_tif_name}, already exists. Daily averages will not be recalculated"})
+                logger.info(f"VHM0 daily average file, {raw_data_tif_name}, already exists. Daily averages will not be recalculated")
             else:
                 logger.info(f"Calculating daily average data from 3-hourly VHM0 data")
                 get_waves_daily_averages(input_file=raw_data_netcdf_name, output_file=raw_data_tif_name)
