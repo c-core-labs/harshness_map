@@ -13,6 +13,9 @@ from osgeo import gdal
 from osgeo_utils import gdal_calc
 import argparse
 import base64
+import re
+from string import ascii_uppercase as alphabet
+import shutil
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -44,7 +47,17 @@ def get_average_raster(input_files = [],
     raster_geo_transform = None
     raster_projection = None
     raster_data_type = gdal.GDT_Float32
+
+    if output_file is None:
+        raise ValueError("Output file is required")
+
     logger.info(f"Calculating average of {len(input_files)} rasters.")
+
+    if len(input_files) == 1:
+        shutil.copy(input_files[0], output_file)
+        logger.info(f"Only one input file given. Input file simply copied to output. Output file is {output_file}")
+        return output_file
+
     for file in input_files:
         with gdal.Open(file) as gdal_dataset:
             band = gdal_dataset.GetRasterBand(1)
@@ -72,7 +85,7 @@ def get_average_raster(input_files = [],
     logger.info(f"Finished averageing rasters. Output file is {output_file}")
     return output_file
 
-def calculate_harshness(start_year=datetime.today().year-1,
+def calculate_harshness_orig(start_year=datetime.today().year-1,
                         end_year=datetime.today().year-1,
                         data_dir = os.path.join(os.getcwd(), "data"),
                         wave_height_thresh=4,
@@ -224,6 +237,134 @@ def calculate_harshness(start_year=datetime.today().year-1,
     logger.info(f"Finished createing harshness map: {harshness_file_name}")
     return harshness_file_name
 
+
+def calculate_harshness(start_year=datetime.today().year-1,
+                        end_year=datetime.today().year-1,
+                        data_dir = os.path.join(os.getcwd(), "data"),
+                        variables = ["siconc", "VHM0", "ibc", "icing"],
+                        thresholds = [60, 4, None, "light"],
+                        formula="6*A/350 + 2.5*B/110 + 1.5*(C>0.01)*(12 + 2*log10((C/10000)+1e-40))",
+                        x_resolution=0.2,
+                        y_resolution=0.2,
+                        bounds=(-71, 41, 25, 82),
+                        clean = True):
+    """Calculates a harshness index given by <formula> using the input data defined by input parameters.
+    Input annual data files are found in <data_dir>.
+    Files containging data between <start_year> and <end_year> for the given thresholds are averaged together to generate the input parameters for <formula>
+    The resulting harshness map is generated in EPSG:4326 at a resolution <x_resolution> x <y_resolution> degrees for the region defined in <bounds>
+    The harshness map is saved as a Geotiff in "<data_dir>/harshness_maps/" with the name:
+    "harshness_<start_year>_<end_year>_<variables>_<thresholds>_<x_resolution>_<y_resolution>_<bounds>_<formula_id>.tif"
+    Parameters:
+        start_year (int): The first year of data files to include (inclusive).
+        end_year (int): The last year of data to include (inclusive).
+        data_dir (str): The parent directory containing the directories "iceberg_annual_data", "waves_annual_data", and "sea_ice_annual_data".
+        variables (list(str)): A list of variables to be used in the formula. Also corresponds to the input files that will be searched for in data_dir.
+        thresholds (list): A list of thresholds to use corrsponding to the given variables. For more information, see README.md
+        formula (str): The formula used for calculating the harshness index using gdalCalc where A, B, C, etc. correspond to the ordered list of variables provided.
+        x_resolution (float): Resolution of the output file in degrees longitude.
+        y_resolution (float): Resolution of the output file in degrees latitude.
+        bounds (tuple(float)): The bounds of the output file in degrees (lon_min, lat_min, lon_max, lat_max).
+        clean (bool): If true, intermediate files will be removed.
+    Returns:
+        harshness_file_name (str): File path of the output harshness map file"""
+
+    if len(variables) != len(thresholds):
+        error = f"Lengths of 'variables' and 'thresholds' lists must be equal. Got lengths {len(variables)} and {len(thresholds)}. Harshness map generation cancelled."
+        logger.error(error)
+        raise ValueError(error)
+
+    if start_year > end_year:
+        error = f"End year must be later than or equal to start year. Got start year: {start_year}, end year: {end_year}. Harshness map generation cancelled."
+        logger.error(error)
+        raise ValueError(error)
+
+    formula = formula.replace(" ", "")
+    logger.info("Running Harshness Map Calculator with the following parameters:")
+    logger.info(f"Start Year: {start_year}")
+    logger.info(f"End Year: {end_year}")
+    logger.info(f"Data Directory: {data_dir}")
+    logger.info("Variables and corresponding thresholds:")
+    for (variable, threshold) in zip(variables, thresholds):
+        logger.info(f"Var: {variable}")
+        logger.info(f"Thresh: {threshold}")
+    logger.info(f"Harshness Formula: {formula}")
+    logger.info(f"X Resolution: {x_resolution}")
+    logger.info(f"Y Resolution: {y_resolution}")
+    logger.info(f"Bounds: {bounds}")    
+    logger.info(f"Clean: {clean}")
+
+    encoded_formula = encode_string(formula) #Create a unique identifier to represent the formula in the filename
+    variables_string = '_'.join(variables)
+    thresholds_string = '_'.join(map(str, thresholds))
+    intermediate_files = []
+    harshness_file_name = f"harshness_{start_year}_{end_year}_{variables_string}_{thresholds_string}_{x_resolution}_{y_resolution}_{bounds[0]}_{bounds[1]}_{bounds[2]}_{bounds[3]}_{encoded_formula}.tif".replace(" ", "")
+    harshness_file_name = os.path.join(data_dir, 'harshness_maps', harshness_file_name)
+
+    #If the requested harshness map already exists, return it
+    if os.path.exists(harshness_file_name):
+        logger.info(f"Harshness map with these parameters already exists: {harshness_file_name}")
+        return harshness_file_name
+    
+    #Gather all input files
+    data_years = list(range(start_year, end_year + 1))
+    input_files = [] #This will be a 2 dimensional list of input files per variable
+    variables_missing_files = []
+    for (variable, threshold) in zip(variables, thresholds):
+        variable_files = []
+        for data_year in data_years:
+            try:
+                if threshold:
+                    input_file = os.path.join(data_dir, variable, f"{variable}_{data_year}_{threshold}.tif")
+                else:
+                    input_file = os.path.join(data_dir, variable, f"{variable}_{data_year}.tif")
+                assert os.path.exists(input_file), f"Annual data file in given date range does not exist: {input_file}."
+                variable_files.append(input_file)
+            except AssertionError as e:
+                variables_missing_files.append(variable)
+                continue
+        input_files.append(variable_files)
+    if variables_missing_files:
+        error = f"The following variables are missing input files: {variables_missing_files}. Harshness map generation cancelled."
+        logger.error(error)
+        raise AssertionError(error)
+
+    #Average and warp input files and create arg dict
+    args = {}
+    for index, (variable, threshold) in enumerate(zip(variables, thresholds)):
+        #Average
+        average_file = os.path.join(data_dir, variable, f"average_{variable}_{start_year}-{end_year}_{threshold}.tif")
+        get_average_raster(input_files[index], average_file)
+        intermediate_files.append(average_file)
+
+        #Warp
+        warped_file = average_file.replace(".tif", f"_{x_resolution}_{y_resolution}_{bounds}.tif".replace(" ", ""))
+        src_srs = "EPSG:4326"
+        if variable == "ibc": #Workaround for ibc data which uses a different projection
+            src_srs = None
+        warped = gdal.Warp(warped_file, average_file, xRes=x_resolution, yRes=y_resolution, srcSRS=src_srs, dstSRS="EPSG:4326", outputBounds=bounds)
+        del warped
+        intermediate_files.append(warped_file)
+
+        #Add to arg dict for gdal_calc
+        args[alphabet[index]] = warped_file
+   
+    #Calculate Harshness
+    if not(os.path.exists(os.path.join(data_dir, 'harshness_maps'))):
+           os.mkdir(os.path.join(data_dir, 'harshness_maps'))
+    
+    logger.info("Running harshness calculation.")
+    gdal_calc.Calc(formula, 
+                   outfile=harshness_file_name,
+                   **args)
+    
+    if clean:
+        for intermediate_file in intermediate_files:
+            os.remove(intermediate_file)
+
+    logger.info(f"Finished createing harshness map: {harshness_file_name}")
+    return harshness_file_name
+
+
 ##########
 ###Main###
 ##########
@@ -234,27 +375,25 @@ if __name__ == "__main__":
 
     parser.add_argument("--start_year", help="The first year of data files to include (inclusive). (int)")
     parser.add_argument("--end_year", help="The last year of data to include (inclusive). (int)")
-    parser.add_argument("--data_dir", help="The parent directory containing the directories 'iceberg_annual_data', 'waves_annual_data', and 'sea_ice_annual_data'. (str)")
-    parser.add_argument("--wave_height_thresh", help="Used to define wave input files. Input files contain # of days with wave height > <wave_height_thresh> metres. (int 1-10)")
-    parser.add_argument("--sea_ice_concentration_thresh", help="Used to define sea ice input files. Input files contain # of days with sea ice concentration > <sea_ice_concentration_thresh> percent. (int 0-90 by 10s)")
-    parser.add_argument("--icing_thresh", help="The threshold for the icing predictor index. Options are 'light', 'moderate', 'heavy', or 'extreme'. (str)")
-    parser.add_argument("--formula", help="The formula used for calculating the harshness index using gdalCalc where S = Sea Ice Data, W = Wave Data, I = Iceberg Data, P = Icing Predictor Index Data. (str)")
+    parser.add_argument("--data_dir", help="The parent directory containing the given variable data. (str)")
+    parser.add_argument("--variables", help ="A list of variables to be used in the formula. Also corresponds to the input files that will be searched for in data_dir. (Comma Separated Strings)")
+    parser.add_argument("--thresholds", help ="A list of thresholds to use corrsponding to the given variables. For more information, see README.md. (Comma Separated Values)")
+    parser.add_argument("--formula", help="The formula used for calculating the harshness index using gdalCalc where A, B, C, etc. correspond to the ordered list of variables provided. (str)")
     parser.add_argument("--x_resolution", help="Resolution of the output file in degrees longitude. (float)")
     parser.add_argument("--y_resolution", help="Resolution of the output file in degrees latitude. (float)")
     parser.add_argument("--lon_min", help="The minimum longitude bound of the output file in degrees. (float)")
     parser.add_argument("--lat_min", help="The minimum latitude bound of the output file in degrees. (float)")
     parser.add_argument("--lon_max", help="The maximum longitude bound of the output file in degrees. (float)")
     parser.add_argument("--lat_max", help="The maximum latitude bound of the output file in degrees. (float)")
-    parser.add_argument("--clean", help="If true, intermediate files will be removed. (bool)") 
+    parser.add_argument("--no_cleanup", help="If present, intermediate files will NOT be removed.", action="store_true") 
 
     #Default values
     start_year=datetime.today().year-1
     end_year=start_year
     data_dir = os.path.join(os.getcwd(), "data")
-    wave_height_thresh=4
-    sea_ice_concentration_thresh=60
-    icing_thresh="light"
-    formula="6*S/350 + 2.5*W/110 + 1.5*(I>0.01)*(12 + 2*log10((I/10000)+1e-40))"
+    variables = ["siconc", "VHM0", "ibc", "icing"]
+    thresholds = [0.64, 4, None, "light"]
+    formula="6*A/350 + 2.5*B/110 + 1.5*(C>0.01)*(12 + 2*log10((C/10000)+1e-40))"
     x_resolution=0.2
     y_resolution=0.2
     lon_min=-71
@@ -264,6 +403,21 @@ if __name__ == "__main__":
     clean = True
 
     args = parser.parse_args()
+    
+    if args.thresholds is not None:
+        #Parse through thresholds list since it can contain strings, ints, floats, or None values
+        thresholds = []
+        threshold_strings = args.thresholds.split(",")
+        for t in threshold_strings:
+            if t.isdigit():
+                thresholds.append(int(t))
+            elif re.match(r"^[+-]?\d*\.\d+$", t):
+                thresholds.append(float(t))
+            elif t == "None":
+                thresholds.append(None)
+            else:
+                thresholds.append(t)
+
     if args.start_year is not None:
         start_year = int(args.start_year)
     if args.end_year is not None:
@@ -272,12 +426,8 @@ if __name__ == "__main__":
         end_year = start_year
     if args.data_dir is not None:
         data_dir = args.data_dir
-    if args.wave_height_thresh is not None:
-        wave_height_thresh = int(args.wave_height_thresh)
-    if args.sea_ice_concentration_thresh is not None:
-        sea_ice_concentration_thresh = int(args.sea_ice_concentration_thresh)
-    if args.icing_thresh is not None:
-        icing_thresh = args.icing_thresh
+    if args.variables is not None:
+        variables = args.variables.split(",")
     if args.formula is not None:
         formula = args.formula
     if args.x_resolution is not None:
@@ -292,17 +442,22 @@ if __name__ == "__main__":
         lon_max = float(args.lon_max)
     if args.lat_max is not None:
         lat_max = float(args.lat_max)   
-    if args.clean is not None:
-        clean = bool(args.clean)
+    if args.no_cleanup is not None:
+        clean = not(args.no_cleanup)
 
-    calculate_harshness(start_year=start_year,
-                        end_year=end_year,
-                        data_dir = data_dir,
-                        wave_height_thresh=wave_height_thresh,
-                        sea_ice_concentration_thresh=sea_ice_concentration_thresh,
-                        icing_thresh=icing_thresh,
-                        formula=formula,
-                        x_resolution=x_resolution,
-                        y_resolution=y_resolution,
-                        bounds=(lon_min,lat_min,lon_max,lat_max),
-                        clean=clean)
+    try:
+        calculate_harshness(start_year=start_year,
+                            end_year=end_year,
+                            data_dir = data_dir,
+                            variables=variables,
+                            thresholds=thresholds,
+                            formula=formula,
+                            x_resolution=x_resolution,
+                            y_resolution=y_resolution,
+                            bounds=(lon_min,lat_min,lon_max,lat_max),
+                            clean=clean)
+    except ValueError as e:
+        logger.error(f"There was an error with the input parameters to calculate_harshness: {e}")
+    except AssertionError as e:
+        logger.error(e)
+
