@@ -798,12 +798,12 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         if clean:
             try:
                 os.remove(raw_data_netcdf_name)
-            except UnboundLocalError:
-                logger.debug(f"raw_data_netcdf_name not set. Skipping deletion.")
+            except (UnboundLocalError, FileNotFoundError):
+                logger.debug(f"raw_data_netcdf_name not set or does not exist. Skipping deletion.")
             try:
                 os.remove(daily_raw_data_file_name)
-            except UnboundLocalError:
-                logger.debug(f"daily_raw_data_file_name not set. Skipping deletion.")
+            except (UnboundLocalError, FileNotFoundError):
+                logger.debug(f"daily_raw_data_file_name not set or does not exist. Skipping deletion.")
 
         logger.info(f"Finished processing {variable} data")
     
@@ -834,7 +834,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.data_year is not None:
-        data_year = args.data_year
+        data_year = int(args.data_year)
     if args.data_dir is not None:
         data_dir = args.data_dir
     if args.variables is not None:

@@ -34,21 +34,17 @@ RUN pip install -r requirements.txt
 RUN pip install --no-cache gdal[numpy]==3.9.1
 
 
-COPY ./create_harshness_map.py .
-COPY ./get_harshness_data.py .
+COPY ./*.py .
+
 
 WORKDIR /root
 COPY .cdsapirc .
 
 RUN mkdir /app/data
-RUN mkdir /app/data/harshness_maps 
-RUN mkdir /app/data/waves_annual_data 
-RUN mkdir /app/data/sea_ice_annual_data 
-RUN mkdir /app/data/iceberg_annual_data 
-RUN mkdir /app/data/icing_predictor_annual_data
-RUN mkdir /app/oilco_iceberg_data
+RUN mkdir /app/data/harshness_maps
+RUN mkdir /app/data/oilco
 
-COPY oilco_iceberg_data /app/oilco_iceberg_data
+COPY ./data/oilco /app/data/oilco
 
 WORKDIR /app
 
