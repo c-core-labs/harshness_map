@@ -37,9 +37,6 @@ RUN pip install --no-cache gdal[numpy]==3.9.1
 COPY ./*.py .
 
 
-WORKDIR /root
-COPY .cdsapirc .
-
 RUN mkdir /app/data
 RUN mkdir /app/data/harshness_maps
 RUN mkdir /app/data/oilco

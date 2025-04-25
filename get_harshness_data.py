@@ -308,6 +308,15 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
     # I couldn't find a universally agreed upon formula for salinity dependant freezing point.
     # At some point we can look into this further, but for now, maybe easiest to just use a constant value of -1.8 for Tf and not worry about salinity
     
+    #Check for .cdsapirc file  - required to download from CDS
+    expected_cdsapirc_path = os.path.join(os.path.expanduser('~'), ".cdsapirc")
+    if not(os.path.exists(expected_cdsapirc_path)):
+        archived_cdsapirc_path = os.path.join(data_dir, ".cdsapirc")
+        try:
+            shutil.copy(archived_cdsapirc_path, expected_cdsapirc_path)
+        except FileNotFoundError as e:
+            logger.error(".cdsapirc file must be created in data directory for CDS downloads to proceed")
+
     #Name output files
     no_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_none.tif")
     light_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_light.tif")
@@ -322,6 +331,9 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
     and os.path.exists(extreme_icing_geotiff_name):
         logger.info(f"Icing predictor maps already exist for {data_year}. Skipping Icing Predictor processing.")
     
+    elif not(os.path.exists(expected_cdsapirc_path)):
+        logger.info(f".cdsapirc file not found. Skipping Icing Predictor processing.")
+
     else:
         #Download datasets#
         if not os.path.exists(os.path.join(data_dir, "icing")):
@@ -867,11 +879,13 @@ if __name__ == "__main__":
                                            clean = clean)
     
     if process_icebergs:
+        logger.info(f"Attempting download and preprocessing of Iceberg Concentration data")
         download_and_preprocess_iceberg_data(data_year = data_year,
                                              data_dir =  data_dir,
                                              clean = clean)
         
     if process_icing_predictor:
+        logger.info(f"Attempting download and preprocessing of Icing Predictor Index data")
         download_and_preprocess_icing_predictor_data(data_year = data_year,
                                                      data_dir =  data_dir,
                                                      clean = clean)

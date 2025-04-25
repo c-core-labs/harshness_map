@@ -138,7 +138,7 @@ def calculate_harshness_orig(start_year=datetime.today().year-1,
 
     #If the requested harshness map already exists, return it
     if os.path.exists(harshness_file_name):
-        logger.info(f"Harshness map with these parameters already ecists: {harshness_file_name}")
+        logger.info(f"Harshness map with these parameters already exists: {harshness_file_name}")
         return harshness_file_name
     
     #Ensure files exist for all years

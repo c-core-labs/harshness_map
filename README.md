@@ -4,9 +4,9 @@
 
 1. If not already installed, [download and install Docker](https://docs.docker.com/engine/install/)
 2. From the directory you would like to install the Harshness Map package `git clone https://github.com/c-core-labs/harshness_map.git`
-3. In the *harshness_map* directory, create a file called .cdsapirc and populate it with your Copernicus Clmate Data Service API URL and Key as per Step 1 here: https://cds.climate.copernicus.eu/how-to-api
-4. From the *harshness_map* directory `docker build -t harshness_map .`
-5. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v $PWD/data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
+3. From the *harshness_map* directory `docker build -t harshness_map .`
+4. To download data from Copernicus Marine, you will need to set your login credentials. This only needs to be done once by running the command `docker run --rm -it -v $PWD/data:/app/data harshness_map copernicusmarine login --configuration-file-directory=/app/data` and entering your Copernicus Marine credentials
+5. In the *harshness_map/data* directory, create a file called .cdsapirc and populate it with your Copernicus Clmate Data Service API URL and Key as per Step 1 here: https://cds.climate.copernicus.eu/how-to-api
 
 ## Determine Data Available for Download and Processing
 The Harshness Map software is capable of downloading various datasets from Copernicus Marine Service (as well some additinal datasets from other sources).
@@ -157,11 +157,11 @@ When calling the `create_harshness_map` script, a custom harshness index formula
 A good place to start when trying out custom formulas is changing certain parameters of the default formula.  
 The default formula can be parameterized as follows:  
   
-`A*S/D + B*W/E + C*(I>T)*(F + G*log10((I/H)+J))`  
+`X*A/D + Y*B/E + Z*(C>T)*(F + G*log10((C/H)+J))`  
 
 Where,  
-`A`, `B`, and `C` are weights for `S`, `W`, and `I` respectively, and should sum to 10.  
-`D`, `E`, `F`, `G`, and 'H' are normalization factors, and should be adjusted based on the data being used.  
+`X`, `Y`, and `Z` are weights for `A`, `B`, and `C` respectively, and should sum to 10.  
+`D`, `E`, `F`, `G`, and `H` are normalization factors, and should be adjusted based on the data being used.  
 `J` is a small value added to the log10 argument simply to avoid taking log10 of zero.  
 `T` is a threshold for iceberg density. Densities < T will be considered 0.  
 
@@ -171,11 +171,32 @@ For example, to put more weight on wave height, and less on sea ice and icebergs
 Or, you may only want to consider two variables:  
 `5*A/200 + 5*B/10`  
 Of course, the formula is completely customizable, so feel free to experiment, here is an example of an acceptable (though probably non-sensical) formula:  
-`A*B + (A>C/10) * D/10 + B/100 + 15` 
+`A*B + (A>C/10) * D/10 + B/100 + 15`  
+If you are interested in viewing only a singe variable, you can use a single variable formula as well:  
+`A`  
 
 
+## Icing Predictor Index
+The icing predictor index is a single parameter which takes sea surface temperature, wind speed, air temperature, and sea ice concentration data into account to provide a prediction of vessel icing rates in different ocean regions.  
+
+The Icing Predicto Index is calculated using the following formula:
+
+`[Va * (Tf-Ta)] / [1 + 0.3*(Tw-Tf)]`
+
+Where,
+`Va` is the wind speed (ms-1)  
+`Tf` is seawater freezing temperature (°C)  
+`Ta` is the ambient air temperature (°C)  
+`Tw` is the Sea Surface Temperature (°C)  
+
+Icing Predictor values are categorized into the following levels:
+PR less than or equal to 0:  no icing  
+PR between 0 and 22:         light icing (icing rate < 0.7 cm/hour)  
+PR between 22 and 53:        moderate icing (icing rate between 0.7-2.0 cm/hour)  
+PR between 53 and 83:        heavy icing (icing rate between 2.0-4.0 cm/hour)  
+PR greater than 83:          extreme icing (icing rate > 4.0 cm/hour)  
 
 ## Data Acknowledgement
-Data utilized in this project are provided by GHRSST, Met Office and CMEMS
+Data utilized in this project are provided by GHRSST, Met Office, CMEMS, and CDS
 
 
