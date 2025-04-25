@@ -338,7 +338,10 @@ def calculate_harshness(start_year=datetime.today().year-1,
 
         #Warp
         warped_file = average_file.replace(".tif", f"_{x_resolution}_{y_resolution}_{bounds}.tif".replace(" ", ""))
-        warped = gdal.Warp(warped_file, average_file, xRes=x_resolution, yRes=y_resolution, srcSRS="EPSG:4326", dstSRS="EPSG:4326", outputBounds=bounds)
+        src_srs = "EPSG:4326"
+        if variable == "ibc": #Workaround for ibc data which uses a different projection
+            src_srs = None
+        warped = gdal.Warp(warped_file, average_file, xRes=x_resolution, yRes=y_resolution, srcSRS=src_srs, dstSRS="EPSG:4326", outputBounds=bounds)
         del warped
         intermediate_files.append(warped_file)
 
