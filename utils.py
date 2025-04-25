@@ -68,7 +68,7 @@ def count_bands_greater_than_thresh(input_file=None,
         thresh (float): The threshold to compare input raster bands to.
     Returns:
         output_file (str)"""
-    logger.debug(f"Counting bands in {input_file} > {thresh}. Output file will be {output_file}")
+    logger.debug(f"Counting bands in {input_file} > {thresh:.2f}. Output file will be {output_file}")
     with gdal.Open(input_file) as input_raster:
         raster_x_size = input_raster.RasterXSize
         raster_y_size = input_raster.RasterYSize

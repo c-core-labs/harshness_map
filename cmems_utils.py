@@ -2,12 +2,14 @@ import copernicusmarine
 import os
 import logging
 from datetime import datetime, timedelta
+import json
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 #Documentation on data structures returned from CMEMs:
 #https://toolbox-docs.marine.copernicus.eu/en/pre-releases-2.0.0a4/response-types.html#copernicusmarine.CopernicusMarineDataset
+
 
 def cmems_products_to_dict(products):
     """Converts a copernicusmarine.CopernicusMarineProduct into python dict.
@@ -78,6 +80,30 @@ def cmems_products_to_dict(products):
     return product_dict
 
 
+def create_cmems_metadata_json(product_ids,
+                               json_filename):
+    """Creates a json file containing metadata from the given list of CMEMs product IDs
+    Parameters:
+        product_ids (list(str)): A list of CMEMs product IDs to gather metadats for.
+        json_filename (str): A path to the file to store the metadata. Must end in ".json"
+    Returns:
+        json_filename (str)"""
+    products = []
+    for product_id in product_ids:
+        product = get_cmems_product_metadata(product_id)
+        products.append(product)
+    metadata_dict = cmems_products_to_dict(products)
+    with open(json_filename, 'w') as file:
+        json.dump(metadata_dict, file)
+
+
+def get_available_cmems_variables(cmems_metadata_json):
+    with open(cmems_metadata_json) as metadata_file:
+        metadata = json.load(metadata_file)
+    variable_short_names = [v for v in metadata]
+    variable_long_names = [metadata[v]['long_name'] for v in metadata]
+    return variable_short_names, variable_long_names
+
 
 def get_cmems_product_metadata(product_id):
     """Downloads metadata for the given product id from CMEMs
@@ -120,6 +146,7 @@ def query_cmems():
                         for variable in service.variables:
                             print("\t\t\t\t\t" + variable.short_name)
 
+
 def download_from_cmems(dataset,
                         variables,
                         start_datetime=datetime.today() - timedelta(days=1),
@@ -128,6 +155,8 @@ def download_from_cmems(dataset,
                         maximum_longitude=None,
                         minimum_latitude=None,
                         maximum_latitude=None,
+                        minimum_depth=None,
+                        maximum_depth=None,
                         output_file=None,
                         credentials_file=None):
     """Downloads data from the Copernicus Marine Service using copernicusmarine.subset().
@@ -140,6 +169,8 @@ def download_from_cmems(dataset,
         maximum_longitude (float)
         minimum_latitude (float)
         maximum_latitude (float)
+        minimum_depth (float)
+        maximum_depth (float)
         output_file (str): File path where the downloaded dataset will be stored. Must be a NetCDF (.nc) file.
         credentials_file (str): Path to the file containing CMEMs credentials
     Returns:
@@ -164,6 +195,8 @@ def download_from_cmems(dataset,
     logger.info(f"maximum_longitude: {maximum_longitude}")
     logger.info(f"minimum_latitude: {minimum_latitude}")
     logger.info(f"maximum_latitude: {maximum_latitude}")
+    logger.info(f"minimum_depth: {minimum_depth}")
+    logger.info(f"maximum_depth: {maximum_depth}")
     logger.info(f"output_file: {output_file}")
     try:
         output_path = copernicusmarine.subset(dataset_id = dataset, 
@@ -172,8 +205,8 @@ def download_from_cmems(dataset,
                                 maximum_longitude = maximum_longitude,
                                 minimum_latitude = minimum_latitude,
                                 maximum_latitude = maximum_latitude,
-                                minimum_depth = None,
-                                maximum_depth = None,
+                                minimum_depth = minimum_depth,
+                                maximum_depth = maximum_depth,
                                 start_datetime = start_datetime, 
                                 end_datetime = end_datetime, 
                                 output_directory = os.path.dirname(output_file), 
@@ -185,43 +218,7 @@ def download_from_cmems(dataset,
         logger.error(f"Download failed: {e}")
         os.remove(output_file)
         raise e
-        
-    
-    
-    # def download_from_cmems(output_file=None, 
-    #                     data_year=None, 
-    #                     dataset=None, 
-    #                     variables=None,
-    #                     credentials_file=None):
-    # """Downloads data from the Copernicus Marine Service using copernicusmarine.subset().
-    # Parameters:
-    #     output_file (str): File path where the downloaded dataset will be stored. Must be a NetCDF (.nc) file.
-    #     data_year (int): The dataset will contain data from Jan 1 to Dec 31 of this year.
-    #     dataset (str): The name of the CMEMs dataset to download.
-    #     variables (list[str]): A list of variables to download from the dataset.
-    # Returns:
-    #     output_file (str)"""
-    # if not os.path.exists(output_file):
-    #     data_year_start = f"{data_year}-01-01"
-    #     data_year_end = f"{data_year}-12-31T21:00:00"
-    #     logger.info(f"Downloading {data_year} {dataset} from Copernicus Marine")
-    #     try:
-    #         copernicusmarine.subset(dataset_id = dataset, 
-    #                                 variables = variables, 
-    #                                 start_datetime = data_year_start, 
-    #                                 end_datetime = data_year_end, 
-    #                                 output_directory = os.path.dirname(output_file), 
-    #                                 output_filename = os.path.basename(output_file), 
-    #                                 credentials_file=credentials_file)
-    #         logger.info(f"Download complete: {output_file}")
-    #     except Exception as e:
-    #         logger.error(f"Download failed: {e}")
-    #         os.remove(output_file)
-    #         raise e
 
-    # else: #File already downloaded
-    #     logger.info(f"{output_file} already exists. Skipping download")
-    # return(output_file)
 
 def download_original_files_from_cmems(output_dir=None, 
                                        data_year=None, 

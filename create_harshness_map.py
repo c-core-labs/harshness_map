@@ -13,7 +13,9 @@ from osgeo import gdal
 from osgeo_utils import gdal_calc
 import argparse
 import base64
+import re
 from string import ascii_uppercase as alphabet
+import shutil
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +53,7 @@ def get_average_raster(input_files = [],
 
     logger.info(f"Calculating average of {len(input_files)} rasters.")
 
-    if len(input_files == 1):
+    if len(input_files) == 1:
         shutil.copy(input_files[0], output_file)
         logger.info(f"Only one input file given. Input file simply copied to output. Output file is {output_file}")
         return output_file
@@ -311,7 +313,10 @@ def calculate_harshness(start_year=datetime.today().year-1,
         variable_files = []
         for data_year in data_years:
             try:
-                input_file = os.path.join(data_dir, variable, f"{variable}_{data_year}_{threshold}.tif")
+                if threshold:
+                    input_file = os.path.join(data_dir, variable, f"{variable}_{data_year}_{threshold}.tif")
+                else:
+                    input_file = os.path.join(data_dir, variable, f"{variable}_{data_year}.tif")
                 assert os.path.exists(input_file), f"Annual data file in given date range does not exist: {input_file}."
                 variable_files.append(input_file)
             except AssertionError as e:
@@ -325,7 +330,7 @@ def calculate_harshness(start_year=datetime.today().year-1,
 
     #Average and warp input files and create arg dict
     args = {}
-    for index, (variable, treshold) in enumerate(zip(variables, thresholds)):
+    for index, (variable, threshold) in enumerate(zip(variables, thresholds)):
         #Average
         average_file = os.path.join(data_dir, variable, f"average_{variable}_{start_year}-{end_year}_{threshold}.tif")
         get_average_raster(input_files[index], average_file)
@@ -344,9 +349,10 @@ def calculate_harshness(start_year=datetime.today().year-1,
     if not(os.path.exists(os.path.join(data_dir, 'harshness_maps'))):
            os.mkdir(os.path.join(data_dir, 'harshness_maps'))
     
+    logger.info("Running harshness calculation.")
     gdal_calc.Calc(formula, 
-                outfile=harshness_file_name,
-                *args)
+                   outfile=harshness_file_name,
+                   **args)
     
     if clean:
         for intermediate_file in intermediate_files:
@@ -366,9 +372,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--start_year", help="The first year of data files to include (inclusive). (int)")
     parser.add_argument("--end_year", help="The last year of data to include (inclusive). (int)")
-    parser.add_argument("--data_dir", help="The parent directory containing the directories 'iceberg_annual_data', 'waves_annual_data', and 'sea_ice_annual_data'. (str)")
+    parser.add_argument("--data_dir", help="The parent directory containing the given variable data. (str)")
     parser.add_argument("--variables", help ="A list of variables to be used in the formula. Also corresponds to the input files that will be searched for in data_dir. (Comma Separated Strings)")
-    parser.add_argument("--thresholds", help ="A list of thresholds to use corrsponding to the given variables. For more information, see README.md. Comma Separated Values")
+    parser.add_argument("--thresholds", help ="A list of thresholds to use corrsponding to the given variables. For more information, see README.md. (Comma Separated Values)")
     parser.add_argument("--formula", help="The formula used for calculating the harshness index using gdalCalc where A, B, C, etc. correspond to the ordered list of variables provided. (str)")
     parser.add_argument("--x_resolution", help="Resolution of the output file in degrees longitude. (float)")
     parser.add_argument("--y_resolution", help="Resolution of the output file in degrees latitude. (float)")
@@ -376,14 +382,14 @@ if __name__ == "__main__":
     parser.add_argument("--lat_min", help="The minimum latitude bound of the output file in degrees. (float)")
     parser.add_argument("--lon_max", help="The maximum longitude bound of the output file in degrees. (float)")
     parser.add_argument("--lat_max", help="The maximum latitude bound of the output file in degrees. (float)")
-    parser.add_argument("--clean", help="If true, intermediate files will be removed. (bool)") 
+    parser.add_argument("--no_cleanup", help="If present, intermediate files will NOT be removed.", action="store_true") 
 
     #Default values
     start_year=datetime.today().year-1
     end_year=start_year
     data_dir = os.path.join(os.getcwd(), "data")
     variables = ["siconc", "VHM0", "ibc", "icing"]
-    thresholds = [60, 4, None, "light"]
+    thresholds = [0.64, 4, None, "light"]
     formula="6*A/350 + 2.5*B/110 + 1.5*(C>0.01)*(12 + 2*log10((C/10000)+1e-40))"
     x_resolution=0.2
     y_resolution=0.2
@@ -402,8 +408,8 @@ if __name__ == "__main__":
         for t in threshold_strings:
             if t.isdigit():
                 thresholds.append(int(t))
-            elif re.match('^[+-]?\d*\.\d+$', t):
-                threholds.append(float(t))
+            elif re.match(r"^[+-]?\d*\.\d+$", t):
+                thresholds.append(float(t))
             elif t == "None":
                 thresholds.append(None)
             else:
@@ -433,8 +439,8 @@ if __name__ == "__main__":
         lon_max = float(args.lon_max)
     if args.lat_max is not None:
         lat_max = float(args.lat_max)   
-    if args.clean is not None:
-        clean = bool(args.clean)
+    if args.no_cleanup is not None:
+        clean = not(args.no_cleanup)
 
     try:
         calculate_harshness(start_year=start_year,

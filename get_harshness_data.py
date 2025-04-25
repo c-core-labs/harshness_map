@@ -25,13 +25,13 @@ import geopandas as gpd
 import pandas as pd
 import subprocess
 import json
-from cmems_utils import download_from_cmems, download_original_files_from_cmems, get_cmems_product_metadata, cmems_products_to_dict
+from cmems_utils import download_from_cmems, download_original_files_from_cmems, get_cmems_product_metadata, cmems_products_to_dict, create_cmems_metadata_json
 from cds_utils import download_from_cds
 from utils import count_bands_greater_than_thresh
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 ##########################
 ###Function Definitions###
@@ -278,26 +278,10 @@ def mosaic_with_cmems(warped_oilco_file, cmems_file, output_mosaic_file, nodata=
     
     return output_mosaic_file
 
-def create_cmems_metadata_json(product_ids,
-                               json_filename):
-    """Creates a json file containing metadata from the given list of CMEMs product IDs
-    Parameters:
-        product_ids (list(str)): A list of CMEMs product IDs to gather metadats for.
-        json_filename (str): A path to the file to store the metadata. Must end in ".json"
-    Returns:
-        json_filename (str)"""
-    products = []
-    for product_id in product_ids:
-        product = get_cmems_product_metadata(product_id)
-        products.append(product)
-    metadata_dict = cmems_products_to_dict(products)
-    with open(json_filename, 'w') as file:
-        json.dump(metadata_dict, file)
-
 
 def download_and_preprocess_icing_predictor_data(data_year = datetime.today().year-1,
                                                  data_dir =  os.path.join(os.getcwd(), "data"),
-                                                 clean = True): #TODO: Finish this function
+                                                 clean = True):
     """Downloads sea surface temperature, wind speed, air temperature, sea ice cover, and sea water salinity data for a given year 
     from Copernicus Climate Data Store and Copernicus Marine Service and uses this data to calculate an annual Icing Predictor Index stored in <data_dir>/icing/.
         Data Downloaded from CDS are:
@@ -325,11 +309,11 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
     # At some point we can look into this further, but for now, maybe easiest to just use a constant value of -1.8 for Tf and not worry about salinity
     
     #Name output files
-    no_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_no_icing.tif")
-    light_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_light_icing.tif")
-    moderate_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_moderate_icing.tif")
-    heavy_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_heavy_icing.tif")
-    extreme_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_extreme_icing.tif")
+    no_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_none.tif")
+    light_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_light.tif")
+    moderate_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_moderate.tif")
+    heavy_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_heavy.tif")
+    extreme_icing_geotiff_name = os.path.join(data_dir, "icing", f"icing_{data_year}_extreme.tif")
     
     if os.path.exists(no_icing_geotiff_name) \
     and os.path.exists(light_icing_geotiff_name) \
@@ -553,7 +537,7 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
 
 def download_and_preprocess_iceberg_data(data_year = datetime.today().year-1,
                                          data_dir =  os.path.join(os.getcwd(), "data"),
-                                         clean = True): #TODO: Finish this function
+                                         clean = True):
     """Downloads iceberg for a given year from Copernicus Marine Service.
     Averages the iceberg density over the year.
     """
@@ -625,11 +609,6 @@ def download_and_preprocess_iceberg_data(data_year = datetime.today().year-1,
     else:
         logger.info(f"No Oilco data for year {data_year} (valid range is 1998-2021)")
         
-           
-    
-
-
-
 
 def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                                  data_dir =  os.path.join(os.getcwd(), "data"),
@@ -699,29 +678,29 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                 
                 time_units = dataset["time_units"]
                 if time_units != DEFAULT_TIME_UNITS:
-                    logger.debug(f"{dataset_name} uses unknown time units. Dataset will not be used.")
+                    logger.info(f"{dataset_name} uses unknown time units. Dataset will not be used.")
                     continue
                 
                 time_step = dataset["time_step"]
                 if time_step != desired_time_step:
-                    logger.debug(f"{dataset_name} uses a time step other than 1 day. Dataset will not be used.")
+                    logger.info(f"{dataset_name} uses a time step other than 1 day. Dataset will not be used.")
                     continue
 
                 #Check that dataset contains the entire year #TODO: Deal with the case when data_year is split between two datasets
                 start_time = dataset["start_time"]
                 start_time = datetime.fromtimestamp(start_time / 1000)
                 if start_time > datetime(data_year, 1, 1):
-                    logger.debug(f"{dataset_name} does not contain all of {data_year}. Dataset will not be used.")
+                    logger.info(f"{dataset_name} does not contain all of {data_year}. Dataset will not be used.")
                     continue
                 end_time = dataset["end_time"]
                 end_time = datetime.fromtimestamp(end_time / 1000)
                 if end_time < datetime(data_year + 1, 1, 1):
-                    logger.debug(f"{dataset_name} does not contain all of {data_year}. Dataset will not be used.")
+                    logger.info(f"{dataset_name} does not contain all of {data_year}. Dataset will not be used.")
                     continue
                 
                 #All checks passed, dataset is suitable, break from loop:
                 dataset_to_download = dataset_name
-                logger.debug(f"{dataset_name} is suitable and will be used for download.")
+                logger.info(f"{dataset_name} is suitable and will be used for download.")
                 break
 
             except KeyError as e:
@@ -732,6 +711,12 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
         if dataset_to_download is None:
             logger.error(f"No suitable dataset found for {variable}. Skipping")
             continue
+
+        #Select depth value to download if multiple options
+        depth = None
+        if metadata[variable]["datasets"][dataset_to_download]["depth_values"]:
+            depth = min(metadata[variable]["datasets"][dataset_to_download]["depth_values"]) #Default to the minimum depth. TODO: Make this user selectable
+            logger.info(f"Multiple depth values for {variable} found in {dataset_to_download}. Using {depth}")
 
         #Download data #TODO: move to function
         logger.info(f"Downloading {variable} Data")
@@ -745,31 +730,12 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
                                 variables =         [variable],
                                 start_datetime =    datetime(data_year, 1, 1),
                                 end_datetime =      datetime(data_year + 1, 1, 1),
+                                minimum_depth =     0,
+                                maximum_depth =     depth,
                                 output_file =       raw_data_netcdf_name, 
                                 credentials_file =  CMEMS_CREDENTIALS_FILE)
             end = time.time()
             logger.info(f"{variable} download took {end-start} seconds")
-
-        #Compute thresholds
-        #Note: Was working on a method to calculate thresholds using mean snd standard dev, but won't work well for non normal distributed data, so will just use uniform thresholds between min and max for now
-        # with gdal.Open(raw_data_netcdf_name) as file:
-        #     scale_factor = file.GetMetadata()[f"{variable}#scale_factor"]
-        #     add_offset = file.GetMetadata()[f"{variable}#add_offset"]
-        #     num_bands = file.RasterCount
-        #     num_samples = file.RasterXSize * file.RasterYSize
-        #     means = []
-        #     variances = []
-        #     for band_num in range(1, num_bands+1):
-        #         band = file.GetRasterBand(band_num)
-        #         (minimum, maximum, mean, standard_deviation) = band.GetStatistics(True, True) #approx_ok=True, force=True
-        #         means.append(mean)
-        #         variances.append(standard_deviation**2)
-        # total_samples = num_samples * num_bands
-        # overall_mean = np.mean(means)
-        # s1 = np.sum([v * num_samples for v in variances])
-        # s2 = np.sum([num_samples * (m - overall_mean)**2 for m in means])
-        # overall_variance = (s1 + s2) / total_samples
-        # overall_standard_deviation = np.sqrt(overall_variance)
 
         logger.info(f"Processing {variable} data")
         daily_raw_data_file_name = raw_data_netcdf_name
@@ -805,7 +771,7 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             except KeyError as e:
                 scale_factor = 1
                 add_offset = 0
-                logger.warning(f"Scale information not found for {variable}. This will not affect results, but threshold values in file names may not represent expected units.")
+                logger.info(f"Scale information not found for {variable}. Dataset will not be scaled.")
         step = (maximum - minimum) / (NUM_THRESHOLDS + 1)
         thresholds = [minimum + step * t for t in range(1,NUM_THRESHOLDS+1)]
         
@@ -816,12 +782,12 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
             # Adjusted threshold is just used for naming output files since it properly reflects the real world units.
             scaled_threshold = threshold * scale_factor + add_offset
 
-            final_count_geotiff_name = f"{variable}_{data_year}_{scaled_threshold:.2g}.tif"
+            final_count_geotiff_name = f"{variable}_{data_year}_{scaled_threshold:.2f}.tif"
             final_count_geotiff_name = os.path.join(variable_dir, final_count_geotiff_name)
             if os.path.exists(final_count_geotiff_name):
                 logger.info(f"{final_count_geotiff_name} already exists. Skipping Processing.")
             else:
-                logger.info(f"Counting number of days with {variable} > {scaled_threshold:.2g}")
+                logger.info(f"Counting number of days with {variable} > {scaled_threshold:.2f}")
                 start = time.time()
                 count_bands_greater_than_thresh(input_file =    daily_raw_data_file_name,
                                                 output_file =   final_count_geotiff_name,
@@ -851,25 +817,61 @@ def download_and_preprocess_cmems_data(data_year = datetime.today().year-1,
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description=download_and_preprocess_data.__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument("--data_year", help="The year over which to download data and make calculations. (int)")
     parser.add_argument("--data_dir", help="Path to a parent directory in which output data will be stored. (str)")
-    parser.add_argument("--clean", help="If true, intermediate files will be removed. (bool)")
-         
+    parser.add_argument("--variables", help="Comma separated variables to be downloaded and processed (Variable short names from CMEMs Metadata). (Comma Separated Strings)")
+    parser.add_argument("--no_cleanup", help="If present, intermediate files will NOT be removed.", action="store_true")
+
     #Default values
     data_year=datetime.today().year-1
     data_dir = os.path.join(os.getcwd(), "data")
+    variables = None
     clean = True
+    process_icebergs = False
+    process_icing_predictor = False
 
     args = parser.parse_args()
     if args.data_year is not None:
         data_year = args.data_year
     if args.data_dir is not None:
         data_dir = args.data_dir
-    if args.clean is not None:
-        clean = args.clean
+    if args.variables is not None:
+        variables = args.variables.split(",")
+    if args.no_cleanup is not None:
+        clean = not(args.no_cleanup)
 
-    download_and_preprocess_data(data_year=data_year,
-                                 data_dir = data_dir,
-                                 clean=clean)
+    #Special handling for "ibc" (iceberg concentration) and "icing" (iicing predictor index)
+    if "ibc" in variables:
+        process_icebergs = True
+        variables.remove("ibc")
+    if "icing" in variables:
+        process_icing_predictor = True
+        variables.remove("icing")
+
+    #Ensure metadata file exists
+    metadata_filename = os.path.join(data_dir, "CMEMs_metadata.json")
+    cmems_products_to_use = ['GLOBAL_MULTIYEAR_BGC_001_02', 'GLOBAL_MULTIYEAR_PHY_001_030', 'GLOBAL_MULTIYEAR_WAV_001_032']
+    if not(os.path.exists(metadata_filename)):
+        logger.info(f"CMEMs metadata file, {metadata_filename}, not found. Getting metadata and creating file.")
+        create_cmems_metadata_json(cmems_products_to_use,
+                                   metadata_filename)
+
+    if variables:
+        logger.info(f"Attempting download and preprocessing of the following variables from CMEMs: {variables}")
+        download_and_preprocess_cmems_data(data_year = data_year,
+                                           data_dir =  data_dir,
+                                           variables = variables,
+                                           metadata_file = metadata_filename,
+                                           clean = clean)
+    
+    if process_icebergs:
+        download_and_preprocess_iceberg_data(data_year = data_year,
+                                             data_dir =  data_dir,
+                                             clean = clean)
+        
+    if process_icing_predictor:
+        download_and_preprocess_icing_predictor_data(data_year = data_year,
+                                                     data_dir =  data_dir,
+                                                     clean = clean)
