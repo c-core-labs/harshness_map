@@ -42,6 +42,7 @@ rather than using uniformly calculated thresholds.
 2. Iceberg Concentration (ibc): Instead of computing thresholds and counting number of days which exceed the thresholds, average annual iceberg concentration is computed instead.
 This aligns with how iceberg concentration data is utilized in the computation of the Fleming-Drover Harshness Index (described below).
 
+
 ### To Run
 1. From the *harshness_map* directory `docker run --rm -it -v $PWD/data:/app/data harshness_map python -m get_harshness_data`
 
@@ -179,7 +180,7 @@ If you are interested in viewing only a singe variable, you can use a single var
 ## Icing Predictor Index
 The icing predictor index is a single parameter which takes sea surface temperature, wind speed, air temperature, and sea ice concentration data into account to provide a prediction of vessel icing rates in different ocean regions.  
 
-The Icing Predicto Index is calculated using the following formula:
+The Icing Predictor Index is calculated using the following formula:
 
 `[Va * (Tf-Ta)] / [1 + 0.3*(Tw-Tf)]`
 

@@ -544,6 +544,16 @@ def download_and_preprocess_icing_predictor_data(data_year = datetime.today().ye
                 os.remove(air_temp_netcdf_name)
                 os.remove(sea_ice_cover_netcdf_name)
             
+            #CDS datasets sometimes use x coordinates of 0 to 360 instead of -180 to 180. Warp the rasters to use 0 as center longitude
+            default_center_long = gdal.GetConfigOption('CENTER_LONG')
+            gdal.SetConfigOption('CENTER_LONG', '0')
+            gdal.Warp(no_icing_geotiff_name, no_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(light_icing_geotiff_name, light_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(moderate_icing_geotiff_name, moderate_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(heavy_icing_geotiff_name, heavy_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.Warp(extreme_icing_geotiff_name, extreme_icing_geotiff_name, srcSRS="+proj=longlat +ellps=WGS84", dstSRS="WGS84")
+            gdal.SetConfigOption('CENTER_LONG', default_center_long)
+            
             logger.info(f"Finished calculating daily icing predictor values for {data_year}")
 
 
